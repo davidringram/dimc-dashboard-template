@@ -1,0 +1,205 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { createSupabase } from "../../lib/supabase";
+
+const { id } = Astro.params;
+const supabase = createSupabase(Astro);
+
+// FETCH LEAD DATA
+const { data: lead } = await supabase
+    .from("leads")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+// If no lead found, kick them back to dashboard
+if (!lead) return Astro.redirect("/dashboard");
+---
+
+<Layout title={`Manage: ${lead.name}`}>
+    <div
+        class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-4"
+    >
+        <div
+            class="w-full max-w-3xl bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden border border-gray-200 dark:border-gray-700"
+        >
+            <div
+                class="bg-gray-100 dark:bg-gray-900/50 p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center"
+            >
+                <div>
+                    <h1
+                        class="text-2xl font-bold text-gray-900 dark:text-white"
+                    >
+                        {lead.name}
+                    </h1>
+                    <span
+                        class="text-xs font-mono text-gray-500 uppercase tracking-widest"
+                        >{lead.status} • {
+                            lead.utm_source || "Unknown Source"
+                        }</span
+                    >
+                </div>
+                <a
+                    href="/dashboard"
+                    class="text-sm text-gray-500 hover:text-gray-900 dark:hover:text-white font-medium"
+                >
+                    ← Back to Board
+                </a>
+            </div>
+
+            <form
+                action="/actions/update_lead"
+                method="POST"
+                class="p-8 space-y-8"
+            >
+                <input type="hidden" name="id" value={lead.id} />
+                <input type="hidden" name="action" value="update" />
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div class="space-y-5">
+                        <h3
+                            class="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700 pb-2"
+                        >
+                            Client Profile
+                        </h3>
+
+                        <label class="block">
+                            <span
+                                class="text-gray-700 dark:text-gray-300 text-sm font-bold"
+                                >Name</span
+                            >
+                            <input
+                                type="text"
+                                name="name"
+                                value={lead.name}
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                        </label>
+                        <label class="block">
+                            <span
+                                class="text-gray-700 dark:text-gray-300 text-sm font-bold"
+                                >Email</span
+                            >
+                            <input
+                                type="email"
+                                name="email"
+                                value={lead.email}
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                        </label>
+                        <label class="block">
+                            <span
+                                class="text-gray-700 dark:text-gray-300 text-sm font-bold"
+                                >Phone</span
+                            >
+                            <input
+                                type="text"
+                                name="phone"
+                                value={lead.phone}
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                        </label>
+                        <label class="block">
+                            <span
+                                class="text-gray-700 dark:text-gray-300 text-sm font-bold"
+                                >Estimated Value ($)</span
+                            >
+                            <input
+                                type="number"
+                                name="estimated_value"
+                                value={lead.estimated_value}
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                        </label>
+                    </div>
+
+                    <div class="space-y-5">
+                        <h3
+                            class="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700 pb-2"
+                        >
+                            Marketing Intel
+                        </h3>
+
+                        <div class="grid grid-cols-3 gap-3">
+                            <label class="block">
+                                <span
+                                    class="text-gray-500 dark:text-gray-400 text-xs font-bold"
+                                    >Source</span
+                                >
+                                <input
+                                    type="text"
+                                    name="utm_source"
+                                    value={lead.utm_source}
+                                    placeholder="e.g. Google"
+                                    class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 placeholder:italic"
+                                />
+                            </label>
+                            <label class="block">
+                                <span
+                                    class="text-gray-500 dark:text-gray-400 text-xs font-bold"
+                                    >Medium</span
+                                >
+                                <input
+                                    type="text"
+                                    name="utm_medium"
+                                    value={lead.utm_medium}
+                                    placeholder="e.g. CPC"
+                                    class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 placeholder:italic"
+                                />
+                            </label>
+                            <label class="block">
+                                <span
+                                    class="text-gray-500 dark:text-gray-400 text-xs font-bold"
+                                    >Campaign</span
+                                >
+                                <input
+                                    type="text"
+                                    name="utm_campaign"
+                                    value={lead.utm_campaign}
+                                    placeholder="e.g. Summer_Sale"
+                                    class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 placeholder:italic"
+                                />
+                            </label>
+                        </div>
+
+                        <div class="pt-2">
+                            <label class="block">
+                                <span
+                                    class="text-gray-700 dark:text-gray-300 text-sm font-bold"
+                                    >Case Notes / Dossier</span
+                                >
+                                <textarea
+                                    name="notes"
+                                    rows="6"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400"
+                                    placeholder="Enter details about the client's needs here..."
+                                    >{lead.notes}</textarea
+                                >
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    class="flex items-center justify-between pt-6 border-t border-gray-100 dark:border-gray-700"
+                >
+                    <button
+                        type="submit"
+                        name="action"
+                        value="delete"
+                        class="text-red-500 text-sm font-medium hover:text-red-700 transition-colors"
+                        onclick="return confirm('Are you sure? This cannot be undone.')"
+                    >
+                        Delete Lead
+                    </button>
+                    <button
+                        type="submit"
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition-all hover:scale-105"
+                    >
+                        Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</Layout>

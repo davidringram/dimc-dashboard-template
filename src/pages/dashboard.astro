@@ -1,0 +1,994 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { createSupabase } from "../lib/supabase";
+import Card from "../components/Card.astro";
+
+const supabase = createSupabase(Astro);
+
+// 1. SECURITY
+const {
+    data: { user },
+} = await supabase.auth.getUser();
+if (!user) return Astro.redirect("/login");
+
+// 2. PARAMS & DATE LOGIC
+const showArchived = Astro.url.searchParams.get("view") === "archived";
+const selectedMonth = Astro.url.searchParams.get("month"); // "2026-01"
+const searchTerm = Astro.url.searchParams.get("search"); // "Soylent"
+
+// Generate Month Links (Past 6 Months)
+const monthLinks = [];
+const today = new Date();
+for (let i = 0; i < 6; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const label = d.toLocaleString("default", {
+        month: "short",
+        year: "2-digit",
+    });
+    const value = d.toISOString().slice(0, 7);
+    monthLinks.push({ label, value });
+}
+
+// 3. FETCH LEADS (The "Brain" of the Dashboard)
+let query = supabase.from("leads").select("*").eq("archived", showArchived);
+
+// PRIORITY 1: Global Search (Overrides everything)
+if (searchTerm) {
+    query = query.or(
+        `name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,utm_source.ilike.%${searchTerm}%`,
+    );
+}
+// PRIORITY 2: Month Filter (If no search)
+else if (selectedMonth) {
+    const [year, month] = selectedMonth.split("-");
+    const startDate = `${selectedMonth}-01`;
+    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+    const endDate = `${selectedMonth}-${lastDay} 23:59:59`;
+
+    query = query.gte("created_at", startDate).lte("created_at", endDate);
+}
+// PRIORITY 3: Default (All Time) -> No extra filters added
+
+const { data: leads, error } = await query;
+if (error) console.error("Supabase Error:", error);
+const leadsList = leads || [];
+
+// 4. FETCH MONTHLY STATS (Ad Spend & Reputation)
+const { data: allStats } = await supabase
+    .from("monthly_stats")
+    .select("*")
+    .order("month", { ascending: false });
+const statsList = allStats || [];
+
+let adSpend = 0;
+let reputation = { count: 0, rating: 0, velocity: 0 };
+
+if (selectedMonth) {
+    // A. Specific Month Selected
+    const currentStat = statsList.find((s) => s.month === selectedMonth);
+
+    // Find previous month for velocity
+    const [y, m] = selectedMonth.split("-").map(Number);
+    const prevDate = new Date(y, m - 2, 1);
+    const prevMonthStr = prevDate.toISOString().slice(0, 7);
+    const prevStat = statsList.find((s) => s.month === prevMonthStr);
+
+    if (currentStat) {
+        adSpend = currentStat.ad_spend;
+        reputation.count = currentStat.review_count;
+        reputation.rating = currentStat.avg_rating;
+        reputation.velocity = prevStat
+            ? currentStat.review_count - prevStat.review_count
+            : 0;
+    }
+} else {
+    // B. All Time (Sum Spend, Latest Reputation)
+    adSpend = statsList.reduce((acc, curr) => acc + (curr.ad_spend || 0), 0);
+
+    const latestStat = statsList[0];
+    const previousStat = statsList[1];
+
+    if (latestStat) {
+        reputation.count = latestStat.review_count;
+        reputation.rating = latestStat.avg_rating;
+        reputation.velocity = previousStat
+            ? latestStat.review_count - previousStat.review_count
+            : 0;
+    }
+}
+
+// 5. THE PULSE (Recent Activity)
+const { data: recentActivity } = await supabase
+    .from("leads")
+    .select("name, status, created_at, utm_source")
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+// 6. CALCULATE ROI METRICS
+const totalLeads = leadsList.length;
+const actualRevenue = leadsList
+    .filter((l) => l.status === "Won")
+    .reduce((sum, lead) => sum + (lead.estimated_value || 0), 0);
+const cpl = totalLeads > 0 ? adSpend / totalLeads : 0;
+const roas = adSpend > 0 ? actualRevenue / adSpend : 0;
+
+const formatMoney = (amount: number) =>
+    new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 0,
+    }).format(amount);
+const formatCurrencyPrecise = (amount: number) =>
+    new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+    }).format(amount);
+
+// 7. STANDARD METRICS
+const projectedRevenue = leadsList
+    .filter((l) => ["New", "Contacted", "In Progress"].includes(l.status))
+    .reduce((sum, lead) => sum + (lead.estimated_value || 0), 0);
+const lostRevenue = leadsList
+    .filter((l) => l.status === "Lost")
+    .reduce((sum, lead) => sum + (lead.estimated_value || 0), 0);
+
+// 8. CHART PREP
+const CHART_COLORS = [
+    "#1C64F2",
+    "#16BDCA",
+    "#FDBA8C",
+    "#E74694",
+    "#9CA3AF",
+    "#F3F4F6",
+];
+
+// Velocity
+const velocityData = leadsList.reduce((acc: any, lead) => {
+    const date = new Date(lead.created_at).toISOString().split("T")[0];
+    acc[date] = (acc[date] || 0) + 1;
+    return acc;
+}, {});
+const velocityCats = Object.keys(velocityData).sort();
+const velocitySeries = velocityCats.map((date) => velocityData[date]);
+
+// Status
+const statusCounts = {
+    New: leadsList.filter((l) => l.status === "New").length,
+    Contacted: leadsList.filter((l) => l.status === "Contacted").length,
+    "In Progress": leadsList.filter((l) => l.status === "In Progress").length,
+    Won: leadsList.filter((l) => l.status === "Won").length,
+    Lost: leadsList.filter((l) => l.status === "Lost").length,
+};
+const statusCats = Object.keys(statusCounts);
+const statusSeries = Object.values(statusCounts);
+
+// Source
+const sourceCounts = leadsList.reduce((acc: any, lead) => {
+    const source = lead.utm_source || "Direct";
+    acc[source] = (acc[source] || 0) + 1;
+    return acc;
+}, {});
+const sourceLabels = Object.keys(sourceCounts);
+const sourceSeries = Object.values(sourceCounts);
+
+// Campaign
+const campaignCounts = leadsList.reduce((acc: any, lead) => {
+    const camp = lead.utm_campaign || "Unspecified";
+    acc[camp] = (acc[camp] || 0) + 1;
+    return acc;
+}, {});
+const campaignLabels = Object.keys(campaignCounts);
+const campaignSeries = Object.values(campaignCounts);
+
+// Kanban
+const kanban = {
+    New: leadsList.filter((l) => l.status === "New"),
+    Contacted: leadsList.filter((l) => l.status === "Contacted"),
+    "In Progress": leadsList.filter((l) => l.status === "In Progress"),
+    Won: leadsList.filter((l) => l.status === "Won"),
+    Lost: leadsList.filter((l) => l.status === "Lost"),
+};
+---
+
+<Layout title="Dashboard">
+    <div class="flex h-screen bg-gray-50 dark:bg-gray-900">
+        <aside
+            id="sidebar"
+            class="fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 dark:bg-gray-800 dark:border-gray-700 transform -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out md:static md:block shrink-0 h-full flex flex-col"
+        >
+            <div class="px-3 py-4 flex-1 overflow-y-auto">
+                <div class="mb-5 px-2">
+                    <span class="text-xl font-semibold dark:text-white"
+                        >DIM&C</span
+                    >
+                </div>
+
+                <ul class="space-y-2 font-medium mb-8">
+                    <li>
+                        <a
+                            href="/dashboard"
+                            class={`flex items-center p-2 rounded-lg group ${!selectedMonth && !showArchived ? "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-200" : "text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+                        >
+                            <span class="ms-3">All Time Overview</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a
+                            href="/dashboard?view=archived"
+                            class={`flex items-center p-2 rounded-lg group ${showArchived ? "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white" : "text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+                        >
+                            <span class="ms-3">The Vault (Archive)</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <div
+                    class="px-2 mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider"
+                >
+                    Monthly Reports
+                </div>
+                <ul class="space-y-1 font-medium mb-10">
+                    {
+                        monthLinks.map((link) => (
+                            <li>
+                                <a
+                                    href={`/dashboard?month=${link.value}`}
+                                    class={`flex items-center p-2 rounded-lg text-sm group ${selectedMonth === link.value ? "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold" : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
+                                >
+                                    <span class="ms-3">{link.label}</span>
+                                </a>
+                            </li>
+                        ))
+                    }
+                </ul>
+
+                <div class="px-2 mb-2 flex items-center justify-between">
+                    <span
+                        class="text-xs font-semibold text-gray-400 uppercase tracking-wider"
+                        >Live Pulse</span
+                    >
+                    <span class="flex h-2 w-2 relative">
+                        <span
+                            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
+                        ></span>
+                        <span
+                            class="relative inline-flex rounded-full h-2 w-2 bg-green-500"
+                        ></span>
+                    </span>
+                </div>
+                <div class="space-y-3 px-2">
+                    {
+                        recentActivity?.map((item) => (
+                            <div class="text-xs border-l-2 border-gray-200 dark:border-gray-700 pl-3 py-1">
+                                <p class="font-medium text-gray-900 dark:text-gray-200 truncate">
+                                    {item.name}
+                                </p>
+                                <p class="text-gray-500 truncate">
+                                    {item.status} via{" "}
+                                    {item.utm_source || "Direct"}
+                                </p>
+                            </div>
+                        ))
+                    }
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+                <a
+                    href="/signout"
+                    class="flex items-center p-2 text-red-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >Sign Out</a
+                >
+            </div>
+        </aside>
+
+        <main class="flex-1 p-8 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+            <div class="md:hidden flex items-center justify-between mb-6">
+                <button
+                    id="mobile-menu-btn"
+                    class="p-2 text-gray-600 rounded-lg hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke-width="1.5"
+                        stroke="currentColor"
+                        class="w-6 h-6"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                        ></path>
+                    </svg>
+                </button>
+                <span class="text-lg font-bold dark:text-white">DIM&C</span>
+                <div class="w-8"></div>
+            </div>
+
+            <div
+                id="sidebar-overlay"
+                class="fixed inset-0 bg-gray-900/50 z-40 hidden md:hidden glass"
+            >
+            </div>
+
+            <div
+                class="flex flex-col md:flex-row md:justify-between md:items-end mb-6 gap-4"
+            >
+                <div>
+                    <h1
+                        class="text-2xl font-bold text-gray-900 dark:text-white"
+                    >
+                        {
+                            searchTerm
+                                ? `Search Results: "${searchTerm}"`
+                                : selectedMonth
+                                  ? `Report: ${monthLinks.find((m) => m.value === selectedMonth)?.label || selectedMonth}`
+                                  : showArchived
+                                    ? "Archived Leads"
+                                    : "Executive Overview"
+                        }
+                    </h1>
+                    <p class="text-gray-500 mt-1 text-sm">
+                        {
+                            searchTerm
+                                ? `Found ${leadsList.length} matches in database`
+                                : selectedMonth
+                                  ? `Performance for the month of ${monthLinks.find((m) => m.value === selectedMonth)?.label}`
+                                  : `Pipeline performance for ${user.email}`
+                        }
+                    </p>
+
+                    {
+                        searchTerm && (
+                            <a
+                                href="/dashboard"
+                                class="mt-2 inline-block text-xs font-semibold text-blue-600 hover:underline"
+                            >
+                                ← Clear Search & Return to Dashboard
+                            </a>
+                        )
+                    }
+                </div>
+
+                {
+                    !showArchived && (
+                        <div class="flex-1 max-w-md mx-4">
+                            <form method="GET" action="/dashboard">
+                                <label for="search" class="sr-only">
+                                    Search leads
+                                </label>
+                                <div class="relative">
+                                    <div class="absolute inset-y-0 start-0 flex items-center ps-3 pointer-events-none">
+                                        <svg
+                                            class="w-4 h-4 text-gray-500 dark:text-gray-400"
+                                            aria-hidden="true"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            fill="none"
+                                            viewBox="0 0 20 20"
+                                        >
+                                            <path
+                                                stroke="currentColor"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"
+                                            />
+                                        </svg>
+                                    </div>
+                                    <input
+                                        type="search"
+                                        name="search"
+                                        value={searchTerm || ""}
+                                        class="block w-full p-2 ps-10 text-sm text-gray-900 border border-gray-300 rounded-lg bg-gray-50 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                                        placeholder="Global search (Press Enter)..."
+                                    />
+                                </div>
+                            </form>
+                        </div>
+                    )
+                }
+
+                {
+                    !showArchived && (
+                        <div class="text-right flex gap-2 justify-end shrink-0">
+                            <a
+                                href="/actions/export_csv"
+                                class="text-gray-900 bg-white border border-gray-300 hover:bg-gray-100 focus:ring-4 focus:ring-gray-100 font-medium rounded-lg text-sm px-5 py-2.5 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:hover:bg-gray-700"
+                            >
+                                <div class="flex items-center gap-2">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke-width="1.5"
+                                        stroke="currentColor"
+                                        class="w-4 h-4"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
+                                        />
+                                    </svg>
+                                    Export
+                                </div>
+                            </a>
+                            <a
+                                href="/leads/new"
+                                class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 dark:bg-blue-600 dark:hover:bg-blue-700 text-center whitespace-nowrap"
+                            >
+                                + Add Opportunity
+                            </a>
+                        </div>
+                    )
+                }
+            </div>
+
+            {
+                !showArchived && (
+                    <>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                                            Ad Spend
+                                        </p>
+                                        <p class="text-2xl font-bold mt-1">
+                                            {formatMoney(adSpend)}
+                                        </p>
+                                    </div>
+                                    <div class="p-2 bg-gray-800 rounded-md">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke-width="1.5"
+                                            stroke="currentColor"
+                                            class="w-6 h-6 text-blue-400"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                                            />
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                                            Cost Per Lead
+                                        </p>
+                                        <p class="text-2xl font-bold mt-1 text-blue-400">
+                                            {formatCurrencyPrecise(cpl)}
+                                        </p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-xs text-gray-400">
+                                            Leads: {totalLeads}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                                            ROAS
+                                        </p>
+                                        <p class="text-2xl font-bold mt-1 text-green-400">
+                                            {roas.toFixed(1)}x
+                                        </p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-xs text-gray-400">
+                                            Rev: {formatMoney(actualRevenue)}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow relative overflow-hidden">
+                                <div class="absolute -right-4 -top-4 opacity-10 text-yellow-500">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                        class="w-24 h-24"
+                                    >
+                                        <path
+                                            fill-rule="evenodd"
+                                            d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"
+                                            clip-rule="evenodd"
+                                        />
+                                    </svg>
+                                </div>
+                                <div class="flex justify-between items-start relative z-10">
+                                    <div>
+                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                                            Reputation
+                                        </p>
+                                        <div class="flex items-center gap-2 mt-1">
+                                            <span class="text-2xl font-bold text-yellow-400">
+                                                {reputation.rating}
+                                            </span>
+                                            <div class="flex text-yellow-400">
+                                                {[...Array(5)].map(() => (
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        viewBox="0 0 24 24"
+                                                        fill="currentColor"
+                                                        class="w-3 h-3"
+                                                    >
+                                                        <path
+                                                            fill-rule="evenodd"
+                                                            d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"
+                                                            clip-rule="evenodd"
+                                                        />
+                                                    </svg>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-sm font-bold text-white">
+                                            {reputation.count} Reviews
+                                        </p>
+                                        {reputation.velocity > 0 && (
+                                            <p class="text-xs text-green-400 font-medium mt-1">
+                                                +{reputation.velocity} New
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                            <div class="flex flex-col gap-4">
+                                <div class="p-5 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex-1 flex flex-col justify-center border-l-4 border-l-blue-500">
+                                    <h5 class="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Projected Pipeline
+                                    </h5>
+                                    <p class="font-bold text-gray-900 dark:text-white text-3xl">
+                                        {formatMoney(projectedRevenue)}
+                                    </p>
+                                </div>
+                                <div class="p-5 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex-1 flex flex-col justify-center border-l-4 border-l-green-500">
+                                    <h5 class="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Actual Revenue (Won)
+                                    </h5>
+                                    <p class="font-bold text-gray-900 dark:text-white text-3xl">
+                                        {formatMoney(actualRevenue)}
+                                    </p>
+                                </div>
+                                <div class="p-5 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex-1 flex flex-col justify-center border-l-4 border-l-red-500">
+                                    <h5 class="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
+                                        Lost Revenue
+                                    </h5>
+                                    <p class="font-bold text-gray-900 dark:text-white text-3xl">
+                                        {formatMoney(lostRevenue)}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div
+                                class="col-span-1 lg:col-span-2 p-6 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 relative min-h-[350px]"
+                                style="overflow: visible; z-index: 10;"
+                            >
+                                <h5 class="mb-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                                    Lead Velocity (7 Days)
+                                </h5>
+                                <div
+                                    id="velocity-chart"
+                                    class="absolute bottom-4 left-4 right-4 top-12"
+                                    data-categories={JSON.stringify(
+                                        velocityCats,
+                                    )}
+                                    data-series={JSON.stringify(velocitySeries)}
+                                />
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                            <div class="p-4 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex flex-col">
+                                <h5 class="mb-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+                                    Leads by Status
+                                </h5>
+                                <div class="relative w-full h-[300px]">
+                                    <div
+                                        id="status-chart"
+                                        class="w-full h-full"
+                                        data-cats={JSON.stringify(statusCats)}
+                                        data-series={JSON.stringify(
+                                            statusSeries,
+                                        )}
+                                    />
+                                </div>
+                            </div>
+                            <div class="p-4 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex flex-col">
+                                <h5 class="mb-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+                                    Leads by Source
+                                </h5>
+                                <div class="relative w-full h-[220px]">
+                                    <div
+                                        id="source-chart"
+                                        class="w-full h-full"
+                                        data-labels={JSON.stringify(
+                                            sourceLabels,
+                                        )}
+                                        data-series={JSON.stringify(
+                                            sourceSeries,
+                                        )}
+                                        data-colors={JSON.stringify(
+                                            CHART_COLORS,
+                                        )}
+                                    />
+                                </div>
+                                <div class="mt-4 grid grid-cols-2 gap-2 border-t border-gray-100 dark:border-gray-700 pt-3">
+                                    {sourceLabels.map((label, index) => (
+                                        <div class="flex items-center text-xs">
+                                            <span
+                                                class="w-2.5 h-2.5 rounded-full mr-2 shrink-0"
+                                                style={`background-color: ${CHART_COLORS[index % CHART_COLORS.length]}`}
+                                            />
+                                            <span class="text-gray-600 dark:text-gray-300 truncate">
+                                                {label}:{" "}
+                                                <span class="font-bold">
+                                                    {sourceSeries[index]}
+                                                </span>
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div class="p-4 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex flex-col">
+                                <h5 class="mb-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+                                    Leads by Campaign
+                                </h5>
+                                <div class="relative w-full h-[220px]">
+                                    <div
+                                        id="campaign-chart"
+                                        class="w-full h-full"
+                                        data-labels={JSON.stringify(
+                                            campaignLabels,
+                                        )}
+                                        data-series={JSON.stringify(
+                                            campaignSeries,
+                                        )}
+                                        data-colors={JSON.stringify(
+                                            CHART_COLORS,
+                                        )}
+                                    />
+                                </div>
+                                <div class="mt-4 grid grid-cols-2 gap-2 border-t border-gray-100 dark:border-gray-700 pt-3">
+                                    {campaignLabels.map((label, index) => (
+                                        <div class="flex items-center text-xs">
+                                            <span
+                                                class="w-2.5 h-2.5 rounded-full mr-2 shrink-0"
+                                                style={`background-color: ${CHART_COLORS[index % CHART_COLORS.length]}`}
+                                            />
+                                            <span class="text-gray-600 dark:text-gray-300 truncate">
+                                                {label}:{" "}
+                                                <span class="font-bold">
+                                                    {campaignSeries[index]}
+                                                </span>
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )
+            }
+
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4">
+                {
+                    selectedMonth
+                        ? `Pipeline Status (${monthLinks.find((m) => m.value === selectedMonth)?.label})`
+                        : "Pipeline Status"
+                }
+            </h2>
+
+            <div
+                class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-12"
+            >
+                <div class="kanban-col bg-gray-100 dark:bg-gray-800">
+                    <div class="kanban-header text-gray-700 dark:text-gray-200">
+                        <h3>New</h3>
+                        <span
+                            class="badge bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+                            >{kanban.New.length}</span
+                        >
+                    </div>
+                    <div class="kanban-body">
+                        {kanban.New.map((lead) => <Card lead={lead} />)}
+                    </div>
+                </div>
+                <div class="kanban-col bg-blue-50 dark:bg-gray-800/50">
+                    <div class="kanban-header text-blue-800 dark:text-blue-300">
+                        <h3>Contacted</h3>
+                        <span
+                            class="badge bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
+                            >{kanban.Contacted.length}</span
+                        >
+                    </div>
+                    <div class="kanban-body">
+                        {
+                            kanban.Contacted.map((lead) => (
+                                <Card lead={lead} border="border-blue-100" />
+                            ))
+                        }
+                    </div>
+                </div>
+                <div class="kanban-col bg-indigo-50 dark:bg-gray-800/50">
+                    <div
+                        class="kanban-header text-indigo-800 dark:text-indigo-300"
+                    >
+                        <h3>In Progress</h3>
+                        <span
+                            class="badge bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-300"
+                            >{kanban["In Progress"].length}</span
+                        >
+                    </div>
+                    <div class="kanban-body">
+                        {
+                            kanban["In Progress"].map((lead) => (
+                                <Card lead={lead} border="border-indigo-100" />
+                            ))
+                        }
+                    </div>
+                </div>
+                <div class="kanban-col bg-green-50 dark:bg-gray-800/50">
+                    <div
+                        class="kanban-header text-green-800 dark:text-green-300"
+                    >
+                        <h3>Won</h3>
+                        <span
+                            class="badge bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                            >{kanban.Won.length}</span
+                        >
+                    </div>
+                    <div class="kanban-body">
+                        {
+                            kanban.Won.map((lead) => (
+                                <Card lead={lead} border="border-green-100" />
+                            ))
+                        }
+                    </div>
+                </div>
+                <div class="kanban-col bg-red-50 dark:bg-gray-800/50">
+                    <div class="kanban-header text-red-800 dark:text-red-300">
+                        <h3>Lost</h3>
+                        <span
+                            class="badge bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                            >{kanban.Lost.length}</span
+                        >
+                    </div>
+                    <div class="kanban-body">
+                        {
+                            kanban.Lost.map((lead) => (
+                                <Card lead={lead} border="border-red-100" />
+                            ))
+                        }
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+</Layout>
+
+<script>
+    import ApexCharts from "apexcharts";
+
+    // --- 1. MOBILE MENU LOGIC ---
+    const btn = document.getElementById("mobile-menu-btn");
+    const sidebar = document.getElementById("sidebar");
+    const overlay = document.getElementById("sidebar-overlay");
+
+    if (btn && sidebar && overlay) {
+        const toggleMenu = () => {
+            const isClosed = sidebar.classList.contains("-translate-x-full");
+            if (isClosed) {
+                sidebar.classList.remove("-translate-x-full");
+                overlay.classList.remove("hidden");
+            } else {
+                sidebar.classList.add("-translate-x-full");
+                overlay.classList.add("hidden");
+            }
+        };
+        btn.addEventListener("click", toggleMenu);
+        overlay.addEventListener("click", toggleMenu);
+    }
+
+    // --- 2. CHART HELPER: Generates the White Box Tooltip ---
+    // This ensures every chart looks exactly the same: Black Text on White Background
+    const getTooltipHTML = (label, value) => {
+        return `
+        <div style="background: #fff; color: #000; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); font-family: Inter, sans-serif; min-width: 100px;">
+            <div style="font-size: 10px; color: #666; margin-bottom: 2px;">${label || "Value"}</div>
+            <span style="font-weight: bold; font-size: 14px;">${value}</span>
+        </div>
+      `;
+    };
+
+    const sharedOptions = {
+        fontFamily: "Inter, sans-serif",
+        toolbar: { show: false },
+        dataLabels: { enabled: false },
+        legend: { show: false },
+        chart: { parentHeightOffset: 0, toolbar: { show: false } },
+    };
+
+    const isDark = document.documentElement.classList.contains("dark");
+    const textColor = isDark ? "#9CA3AF" : "#111827";
+
+    // --- A. VELOCITY CHART ---
+    const velDiv = document.getElementById("velocity-chart") as HTMLElement;
+    if (velDiv && velDiv.dataset.series && velDiv.dataset.categories) {
+        new ApexCharts(velDiv, {
+            ...sharedOptions,
+            chart: {
+                type: "area",
+                height: "100%",
+                toolbar: { show: false },
+                parentHeightOffset: 0,
+            },
+            stroke: { curve: "smooth", width: 2 },
+            series: [
+                {
+                    name: "Leads",
+                    data: JSON.parse(velDiv.dataset.series),
+                    color: "#1A56DB",
+                },
+            ],
+            xaxis: {
+                categories: JSON.parse(velDiv.dataset.categories),
+                labels: { style: { colors: textColor } },
+                tooltip: { enabled: false },
+            },
+            yaxis: { show: true, labels: { style: { colors: textColor } } },
+            grid: { show: true, strokeDashArray: 4 },
+            fill: {
+                type: "gradient",
+                gradient: {
+                    shadeIntensity: 1,
+                    opacityFrom: 0.7,
+                    opacityTo: 0.05,
+                    stops: [0, 90, 100],
+                },
+            },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, dataPointIndex, w }) {
+                    const val = series[seriesIndex][dataPointIndex];
+                    return getTooltipHTML("Leads", val);
+                },
+            },
+        }).render();
+    }
+
+    // --- B. STATUS CHART ---
+    const statusDiv = document.getElementById("status-chart") as HTMLElement;
+    if (statusDiv && statusDiv.dataset.cats && statusDiv.dataset.series) {
+        new ApexCharts(statusDiv, {
+            ...sharedOptions,
+            chart: { type: "bar", height: "100%", parentHeightOffset: 0 },
+            plotOptions: {
+                bar: { borderRadius: 4, horizontal: true, barHeight: "50%" },
+            },
+            xaxis: {
+                categories: JSON.parse(statusDiv.dataset.cats),
+                labels: { style: { colors: textColor } },
+            },
+            yaxis: {
+                labels: {
+                    style: {
+                        colors: textColor,
+                        fontSize: "11px",
+                        fontWeight: "bold",
+                    },
+                },
+            },
+            series: [
+                { name: "Leads", data: JSON.parse(statusDiv.dataset.series) },
+            ],
+            colors: ["#3B82F6"],
+            grid: { show: false },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, dataPointIndex, w }) {
+                    const val = series[seriesIndex][dataPointIndex];
+                    // Get the category name (e.g., "Won")
+                    const cat = w.globals.labels[dataPointIndex];
+                    return getTooltipHTML(cat, val);
+                },
+            },
+        }).render();
+    }
+
+    // --- C. SOURCE CHART ---
+    const sourceDiv = document.getElementById("source-chart") as HTMLElement;
+    if (
+        sourceDiv &&
+        sourceDiv.dataset.labels &&
+        sourceDiv.dataset.series &&
+        sourceDiv.dataset.colors
+    ) {
+        new ApexCharts(sourceDiv, {
+            ...sharedOptions,
+            chart: { type: "donut", height: "100%" },
+            labels: JSON.parse(sourceDiv.dataset.labels),
+            series: JSON.parse(sourceDiv.dataset.series).map(Number),
+            colors: JSON.parse(sourceDiv.dataset.colors),
+            plotOptions: { pie: { donut: { size: "75%" } } },
+            stroke: { show: false },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, w }) {
+                    const val = series[seriesIndex];
+                    const label = w.globals.labels[seriesIndex];
+                    return getTooltipHTML(label, val);
+                },
+            },
+        }).render();
+    }
+
+    // --- D. CAMPAIGN CHART ---
+    const campDiv = document.getElementById("campaign-chart") as HTMLElement;
+    if (
+        campDiv &&
+        campDiv.dataset.labels &&
+        campDiv.dataset.series &&
+        campDiv.dataset.colors
+    ) {
+        new ApexCharts(campDiv, {
+            ...sharedOptions,
+            chart: { type: "donut", height: "100%" },
+            labels: JSON.parse(campDiv.dataset.labels),
+            series: JSON.parse(campDiv.dataset.series).map(Number),
+            colors: JSON.parse(campDiv.dataset.colors),
+            plotOptions: { pie: { donut: { size: "75%" } } },
+            stroke: { show: false },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, w }) {
+                    const val = series[seriesIndex];
+                    const label = w.globals.labels[seriesIndex];
+                    return getTooltipHTML(label, val);
+                },
+            },
+        }).render();
+    }
+</script>
+
+<style is:global>
+    /* 1. KANBAN STYLES */
+    .kanban-col {
+        @apply rounded-lg p-3 min-h-[500px];
+    }
+    .kanban-header {
+        @apply flex justify-between items-center mb-4 font-bold;
+    }
+    .badge {
+        @apply text-xs font-medium px-2.5 py-0.5 rounded;
+    }
+    .kanban-body {
+        @apply space-y-3;
+    }
+
+    /* 2. CHART FIXES */
+    /* Allow charts to draw outside their box so tooltips don't get cut off */
+    .apexcharts-canvas {
+        overflow: visible !important;
+    }
+    .apexcharts-tooltip {
+        /* Ensure it sits on top of everything */
+        z-index: 9999 !important;
+    }
+</style>

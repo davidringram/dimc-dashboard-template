@@ -1,0 +1,11 @@
+---
+import { createSupabase } from "../lib/supabase";
+
+const supabase = createSupabase(Astro);
+
+// Delete the session (cookie) on the server
+await supabase.auth.signOut();
+
+// Redirect to login
+return Astro.redirect("/login");
+---
