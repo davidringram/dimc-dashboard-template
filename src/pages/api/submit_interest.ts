@@ -1,10 +1,17 @@
 import type { APIRoute } from "astro";
-import { createSupabase } from "../../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
-export const POST: APIRoute = async ({ request, cookies }) => {
-    // Initialize Supabase using the CURRENT environment's keys
-    // This automatically routes data to the correct Client DB based on the Netlify site
-    const supabase = createSupabase({ cookies });
+export const POST: APIRoute = async ({ request }) => {
+    // Use environment variables directly for public ingestion
+    // This is more robust for public-facing forms
+    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+        return new Response(JSON.stringify({ error: "Server configuration missing." }), { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     try {
         const formData = await request.formData();
@@ -14,18 +21,15 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             return new Response(JSON.stringify({ error: "Email is required" }), { status: 400 });
         }
 
-        // Map Form Data to "God Tier" DB Schema
+        // Map Form Data to our specific DB Schema
         const leadData = {
             name: formData.get("name")?.toString() || "Unknown Subject",
             email: email,
-            phone: formData.get("phone")?.toString(),
-            // Map "Location" input to 'geo_location' or 'company' depending on your final DB choice
-            // (We settled on 'geo_location' in the last step)
-            geo_location: formData.get("location")?.toString(),
-            service: formData.get("service")?.toString(),
+            phone: formData.get("phone")?.toString() || null,
+            geo_location: formData.get("location")?.toString() || null,
+            service: formData.get("service")?.toString() || null,
             notes: `Public Inquiry:\n${formData.get("details")?.toString() || ''}`,
             status: 'New',
-            // Auto-tag source so you know it came from the website
             utm_source: 'Website_Form',
             utm_medium: 'Organic',
             estimated_value: 0,
@@ -40,13 +44,15 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             return new Response(JSON.stringify({ error: error.message }), { status: 500 });
         }
 
-        // Success - Redirect with flag
+        // Success - Redirect back to home with success flag
+        // This allows the index.astro to show the "Transmission Received" message
         return new Response(null, {
             status: 302,
             headers: { Location: "/?success=true" },
         });
 
     } catch (err) {
-        return new Response(JSON.stringify({ error: "Server Error" }), { status: 500 });
+        console.error("Catch Error:", err);
+        return new Response(JSON.stringify({ error: "System Error: Contact Terminated" }), { status: 500 });
     }
 };
