@@ -1,34 +1,38 @@
 import type { APIRoute } from "astro";
-import { createSupabase } from "../../../lib/supabase";
+import { createSupabase } from "../../lib/supabase";
 
-export const POST: APIRoute = async ({ request, redirect }) => {
-    // 1. Setup Supabase (Use Service Role Key if RLS blocks public inserts, 
-    // but for now we assume public can insert 'New' leads or we use standard client)
-    const supabase = createSupabase({ request } as any);
+export const POST: APIRoute = async ({ request, cookies }) => {
+    const supabase = createSupabase({ cookies });
 
-    const formData = await request.formData();
+    try {
+        const formData = await request.formData();
+        const email = formData.get("email")?.toString();
 
-    // 2. Extract Data
-    const leadData = {
-        name: formData.get("name")?.toString(),
-        email: formData.get("email")?.toString(),
-        phone: formData.get("phone")?.toString(),
-        company: formData.get("company")?.toString(), // You might need to add this column to DB later, or put in notes
-        notes: `Public Application:\n${formData.get("details")?.toString() || 'No details provided.'}`,
-        status: 'New',
-        utm_source: 'Website_Application',
-        estimated_value: 0, // You set this later
-        created_at: new Date().toISOString(),
-    };
+        if (!email) {
+            return new Response(JSON.stringify({ error: "Email is required" }), { status: 400 });
+        }
 
-    // 3. Insert into Database
-    const { error } = await supabase.from('leads').insert([leadData]);
+        // Insert into 'leads' table
+        const { error } = await supabase.from("leads").insert({
+            email,
+            name: "Interested User", // Placeholder since we only captured email
+            status: "New",
+            source: "Landing Page",
+            notes: "Auto-captured from interest form",
+            created_at: new Date().toISOString(),
+        });
 
-    if (error) {
-        console.error("Lead Gen Error:", error);
-        return new Response(error.message, { status: 500 });
+        if (error) {
+            return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+        }
+
+        // Success - Redirect back to home with a query param for a thank you message
+        return new Response(null, {
+            status: 302,
+            headers: { Location: "/?success=true" },
+        });
+
+    } catch (err) {
+        return new Response(JSON.stringify({ error: "Server Error" }), { status: 500 });
     }
-
-    // 4. Redirect to Thank You
-    return redirect("/?success=true");
 };
