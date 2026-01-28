@@ -13,10 +13,10 @@ if (!user) return Astro.redirect("/login");
 
 // 2. PARAMS & DATE LOGIC
 const showArchived = Astro.url.searchParams.get("view") === "archived";
-const selectedMonth = Astro.url.searchParams.get("month"); // "2026-01"
-const searchTerm = Astro.url.searchParams.get("search"); // "Soylent"
+const selectedMonth = Astro.url.searchParams.get("month");
+const searchTerm = Astro.url.searchParams.get("search");
 
-// Generate Month Links (Past 6 Months)
+// Generate Month Links
 const monthLinks = [];
 const today = new Date();
 for (let i = 0; i < 6; i++) {
@@ -28,46 +28,39 @@ for (let i = 0; i < 6; i++) {
     const value = d.toISOString().slice(0, 7);
     monthLinks.push({ label, value });
 }
+const chartMonths = [...monthLinks].reverse();
 
-// 3. FETCH LEADS (The "Brain" of the Dashboard)
+// 3. FETCH LEADS
 let query = supabase.from("leads").select("*").eq("archived", showArchived);
 
-// PRIORITY 1: Global Search (Overrides everything)
 if (searchTerm) {
     query = query.or(
-        `name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,utm_source.ilike.%${searchTerm}%`,
+        `name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,utm_source.ilike.%${searchTerm}%,geo_location.ilike.%${searchTerm}%,service.ilike.%${searchTerm}%`,
     );
-}
-// PRIORITY 2: Month Filter (If no search)
-else if (selectedMonth) {
+} else if (selectedMonth) {
     const [year, month] = selectedMonth.split("-");
     const startDate = `${selectedMonth}-01`;
     const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
     const endDate = `${selectedMonth}-${lastDay} 23:59:59`;
-
     query = query.gte("created_at", startDate).lte("created_at", endDate);
 }
-// PRIORITY 3: Default (All Time) -> No extra filters added
 
 const { data: leads, error } = await query;
-if (error) console.error("Supabase Error:", error);
 const leadsList = leads || [];
 
-// 4. FETCH MONTHLY STATS (Ad Spend & Reputation)
+// 4. FETCH MONTHLY STATS
 const { data: allStats } = await supabase
     .from("monthly_stats")
     .select("*")
     .order("month", { ascending: false });
 const statsList = allStats || [];
 
+// --- METRICS ---
 let adSpend = 0;
 let reputation = { count: 0, rating: 0, velocity: 0 };
 
 if (selectedMonth) {
-    // A. Specific Month Selected
     const currentStat = statsList.find((s) => s.month === selectedMonth);
-
-    // Find previous month for velocity
     const [y, m] = selectedMonth.split("-").map(Number);
     const prevDate = new Date(y, m - 2, 1);
     const prevMonthStr = prevDate.toISOString().slice(0, 7);
@@ -82,12 +75,9 @@ if (selectedMonth) {
             : 0;
     }
 } else {
-    // B. All Time (Sum Spend, Latest Reputation)
     adSpend = statsList.reduce((acc, curr) => acc + (curr.ad_spend || 0), 0);
-
     const latestStat = statsList[0];
     const previousStat = statsList[1];
-
     if (latestStat) {
         reputation.count = latestStat.review_count;
         reputation.rating = latestStat.avg_rating;
@@ -97,14 +87,6 @@ if (selectedMonth) {
     }
 }
 
-// 5. THE PULSE (Recent Activity)
-const { data: recentActivity } = await supabase
-    .from("leads")
-    .select("name, status, created_at, utm_source")
-    .order("created_at", { ascending: false })
-    .limit(5);
-
-// 6. CALCULATE ROI METRICS
 const totalLeads = leadsList.length;
 const actualRevenue = leadsList
     .filter((l) => l.status === "Won")
@@ -124,34 +106,138 @@ const formatCurrencyPrecise = (amount: number) =>
         currency: "USD",
     }).format(amount);
 
-// 7. STANDARD METRICS
-const projectedRevenue = leadsList
-    .filter((l) => ["New", "Contacted", "In Progress"].includes(l.status))
-    .reduce((sum, lead) => sum + (lead.estimated_value || 0), 0);
-const lostRevenue = leadsList
-    .filter((l) => l.status === "Lost")
-    .reduce((sum, lead) => sum + (lead.estimated_value || 0), 0);
+// --- THE PULSE ---
+const { data: recentActivity } = await supabase
+    .from("leads")
+    .select("name, status, created_at, utm_source")
+    .order("created_at", { ascending: false })
+    .limit(5);
 
-// 8. CHART PREP
-const CHART_COLORS = [
-    "#1C64F2",
-    "#16BDCA",
-    "#FDBA8C",
-    "#E74694",
-    "#9CA3AF",
-    "#F3F4F6",
-];
+// --- CHART DATA PREP ---
+const CHART_COLORS = ["#ea580c", "#65a30d", "#a3a3a3", "#d97706", "#475569"];
+const WL_COLORS = ["#65a30d", "#ef4444", "#1a1e18"];
 
-// Velocity
-const velocityData = leadsList.reduce((acc: any, lead) => {
-    const date = new Date(lead.created_at).toISOString().split("T")[0];
-    acc[date] = (acc[date] || 0) + 1;
+// 1. GEO LOCATION
+const geoCounts = leadsList.reduce((acc: any, lead) => {
+    const loc = lead.geo_location || "Unknown";
+    acc[loc] = (acc[loc] || 0) + 1;
     return acc;
 }, {});
-const velocityCats = Object.keys(velocityData).sort();
-const velocitySeries = velocityCats.map((date) => velocityData[date]);
+const sortedGeo = Object.entries(geoCounts)
+    .sort((a: any, b: any) => b[1] - a[1])
+    .slice(0, 10);
+const geoLabels = sortedGeo.map((x) => x[0]);
+const geoSeries = sortedGeo.map((x) => x[1]);
 
-// Status
+// 2. SERVICE TYPE
+const serviceCounts = leadsList.reduce((acc: any, lead) => {
+    const srv = lead.service || "General";
+    acc[srv] = (acc[srv] || 0) + 1;
+    return acc;
+}, {});
+const sortedService = Object.entries(serviceCounts)
+    .sort((a: any, b: any) => b[1] - a[1])
+    .slice(0, 10);
+const serviceLabels = sortedService.map((x) => x[0]);
+const serviceSeries = sortedService.map((x) => x[1]);
+
+// 3. PEAK TIME (HEATMAP: 7x24)
+const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const heatmapSeries = days.map((day) => ({
+    name: day,
+    data: Array.from({ length: 24 }, (_, h) => ({ x: `${h}:00`, y: 0 })),
+}));
+
+leadsList.forEach((lead) => {
+    if (lead.created_at) {
+        const date = new Date(lead.created_at);
+        const dayIndex = date.getDay();
+        const hourIndex = date.getHours();
+        if (
+            heatmapSeries[dayIndex] &&
+            heatmapSeries[dayIndex].data[hourIndex]
+        ) {
+            heatmapSeries[dayIndex].data[hourIndex].y += 1;
+        }
+    }
+});
+
+// 4. WIN vs LOSS vs OPEN
+const wonCount = leadsList.filter((l) => l.status === "Won").length;
+const lostCount = leadsList.filter((l) => l.status === "Lost").length;
+const openCount = totalLeads - wonCount - lostCount;
+const wlSeries = [wonCount, lostCount, openCount];
+const wlLabels = ["Won", "Lost", "Open Pipeline"];
+
+// --- DYNAMIC CHARTS (Velocity & Finance) ---
+let velocityLabels = [];
+let velocityData = [];
+let financialLabels = [];
+let financialSpend = [];
+let financialRevenue = [];
+let financialTitle = "";
+let velocityTitle = "";
+
+if (selectedMonth) {
+    financialTitle = `Daily Revenue vs Spend (${monthLinks.find((m) => m.value === selectedMonth)?.label})`;
+    velocityTitle = `Lead Velocity (Daily)`;
+
+    const [year, month] = selectedMonth.split("-").map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const monthlySpend =
+        statsList.find((s) => s.month === selectedMonth)?.ad_spend || 0;
+    const dailyAvgSpend = monthlySpend / daysInMonth;
+
+    for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        velocityLabels.push(String(d));
+        financialLabels.push(String(d));
+
+        velocityData.push(
+            leadsList.filter((l) => l.created_at.startsWith(dateStr)).length,
+        );
+
+        const rev = leadsList
+            .filter(
+                (l) => l.status === "Won" && l.created_at.startsWith(dateStr),
+            )
+            .reduce((sum, l) => sum + (l.estimated_value || 0), 0);
+        financialRevenue.push(rev);
+        financialSpend.push(dailyAvgSpend);
+    }
+} else {
+    financialTitle = "Revenue Gained vs. Spend (6 Months)";
+    velocityTitle = "Lead Velocity (Last 14 Days)";
+
+    const chartMonths = [...monthLinks].reverse();
+    financialLabels = chartMonths.map((m) => m.label);
+    financialSpend = chartMonths.map((m) => {
+        const stat = statsList.find((s) => s.month === m.value);
+        return stat ? stat.ad_spend : 0;
+    });
+    financialRevenue = chartMonths.map((m) => {
+        const [y, mo] = m.value.split("-");
+        return leadsList
+            .filter(
+                (l) => l.status === "Won" && l.created_at.startsWith(m.value),
+            )
+            .reduce((sum, l) => sum + (l.estimated_value || 0), 0);
+    });
+
+    for (let i = 13; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().split("T")[0];
+        const monthShort = d.toLocaleString("default", { month: "short" });
+        const dayNum = d.getDate();
+        velocityLabels.push(`${monthShort} ${dayNum}`);
+        velocityData.push(
+            leadsList.filter((l) => l.created_at.startsWith(dateStr)).length,
+        );
+    }
+}
+
+// 5. TACTICAL CHARTS
 const statusCounts = {
     New: leadsList.filter((l) => l.status === "New").length,
     Contacted: leadsList.filter((l) => l.status === "Contacted").length,
@@ -162,7 +248,6 @@ const statusCounts = {
 const statusCats = Object.keys(statusCounts);
 const statusSeries = Object.values(statusCounts);
 
-// Source
 const sourceCounts = leadsList.reduce((acc: any, lead) => {
     const source = lead.utm_source || "Direct";
     acc[source] = (acc[source] || 0) + 1;
@@ -171,7 +256,14 @@ const sourceCounts = leadsList.reduce((acc: any, lead) => {
 const sourceLabels = Object.keys(sourceCounts);
 const sourceSeries = Object.values(sourceCounts);
 
-// Campaign
+const mediumCounts = leadsList.reduce((acc: any, lead) => {
+    const med = lead.utm_medium || "Unspecified";
+    acc[med] = (acc[med] || 0) + 1;
+    return acc;
+}, {});
+const mediumLabels = Object.keys(mediumCounts);
+const mediumSeries = Object.values(mediumCounts);
+
 const campaignCounts = leadsList.reduce((acc: any, lead) => {
     const camp = lead.utm_campaign || "Unspecified";
     acc[camp] = (acc[camp] || 0) + 1;
@@ -180,7 +272,6 @@ const campaignCounts = leadsList.reduce((acc: any, lead) => {
 const campaignLabels = Object.keys(campaignCounts);
 const campaignSeries = Object.values(campaignCounts);
 
-// Kanban
 const kanban = {
     New: leadsList.filter((l) => l.status === "New"),
     Contacted: leadsList.filter((l) => l.status === "Contacted"),
@@ -190,50 +281,65 @@ const kanban = {
 };
 ---
 
-<Layout title="Dashboard">
-    <div class="flex h-screen bg-gray-50 dark:bg-gray-900">
+<Layout title="Command Center">
+    <div class="flex h-screen bg-[#353c33] text-white font-sans">
         <aside
             id="sidebar"
-            class="fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 dark:bg-gray-800 dark:border-gray-700 transform -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out md:static md:block shrink-0 h-full flex flex-col"
+            class="fixed inset-y-0 left-0 z-50 w-64 bg-[#1f241d] border-r border-[#353c33] transform -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out md:static md:block shrink-0 h-full flex flex-col"
         >
-            <div class="px-3 py-4 flex-1 overflow-y-auto">
-                <div class="mb-5 px-2">
-                    <span class="text-xl font-semibold dark:text-white"
-                        >DIM&C</span
+            <div class="px-3 py-6 flex-1 overflow-y-auto flex flex-col">
+                <div class="mb-8 px-2">
+                    <h1
+                        class="text-xl font-black uppercase tracking-wider text-white"
                     >
+                        DIM&C <span class="text-[#ea580c] text-xs align-top"
+                            >OS</span
+                        >
+                    </h1>
+                    <p
+                        class="text-xs text-gray-500 uppercase tracking-widest mt-1"
+                    >
+                        Command Center
+                    </p>
                 </div>
 
-                <ul class="space-y-2 font-medium mb-8">
+                <ul class="space-y-1 font-medium mb-8">
                     <li>
                         <a
                             href="/dashboard"
-                            class={`flex items-center p-2 rounded-lg group ${!selectedMonth && !showArchived ? "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-200" : "text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+                            class={`flex items-center p-2 rounded-sm group ${!selectedMonth && !showArchived ? "bg-[#353c33] text-white border-l-2 border-[#ea580c]" : "text-gray-400 hover:bg-[#282e26] hover:text-white"}`}
                         >
-                            <span class="ms-3">All Time Overview</span>
+                            <span
+                                class="ms-3 text-sm uppercase tracking-wider font-bold"
+                                >Overview</span
+                            >
                         </a>
                     </li>
                     <li>
                         <a
                             href="/dashboard?view=archived"
-                            class={`flex items-center p-2 rounded-lg group ${showArchived ? "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white" : "text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+                            class={`flex items-center p-2 rounded-sm group ${showArchived ? "bg-[#353c33] text-white border-l-2 border-[#ea580c]" : "text-gray-400 hover:bg-[#282e26] hover:text-white"}`}
                         >
-                            <span class="ms-3">The Vault (Archive)</span>
+                            <span
+                                class="ms-3 text-sm uppercase tracking-wider font-bold"
+                                >The Vault</span
+                            >
                         </a>
                     </li>
                 </ul>
 
                 <div
-                    class="px-2 mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider"
+                    class="px-2 mb-2 text-xs font-bold text-[#65a30d] uppercase tracking-widest"
                 >
-                    Monthly Reports
+                    Reports
                 </div>
-                <ul class="space-y-1 font-medium mb-10">
+                <ul class="space-y-1 font-medium mb-auto">
                     {
                         monthLinks.map((link) => (
                             <li>
                                 <a
                                     href={`/dashboard?month=${link.value}`}
-                                    class={`flex items-center p-2 rounded-lg text-sm group ${selectedMonth === link.value ? "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-bold" : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
+                                    class={`flex items-center p-2 rounded-sm text-sm group ${selectedMonth === link.value ? "bg-[#353c33] text-white border-l-2 border-[#ea580c]" : "text-gray-400 hover:bg-[#282e26] hover:text-white"}`}
                                 >
                                     <span class="ms-3">{link.label}</span>
                                 </a>
@@ -242,184 +348,94 @@ const kanban = {
                     }
                 </ul>
 
-                <div class="px-2 mb-2 flex items-center justify-between">
-                    <span
-                        class="text-xs font-semibold text-gray-400 uppercase tracking-wider"
-                        >Live Pulse</span
+                <div class="mt-8">
+                    <div
+                        class="px-2 mb-2 flex items-center justify-between border-t border-[#353c33] pt-4"
                     >
-                    <span class="flex h-2 w-2 relative">
                         <span
-                            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
-                        ></span>
-                        <span
-                            class="relative inline-flex rounded-full h-2 w-2 bg-green-500"
-                        ></span>
-                    </span>
-                </div>
-                <div class="space-y-3 px-2">
-                    {
-                        recentActivity?.map((item) => (
-                            <div class="text-xs border-l-2 border-gray-200 dark:border-gray-700 pl-3 py-1">
-                                <p class="font-medium text-gray-900 dark:text-gray-200 truncate">
-                                    {item.name}
-                                </p>
-                                <p class="text-gray-500 truncate">
-                                    {item.status} via{" "}
-                                    {item.utm_source || "Direct"}
-                                </p>
-                            </div>
-                        ))
-                    }
+                            class="text-xs font-bold text-[#65a30d] uppercase tracking-widest"
+                            >Live Pulse</span
+                        >
+                        <span class="flex h-2 w-2 relative">
+                            <span
+                                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ea580c] opacity-75"
+                            ></span>
+                            <span
+                                class="relative inline-flex rounded-full h-2 w-2 bg-[#ea580c]"
+                            ></span>
+                        </span>
+                    </div>
+                    <div class="space-y-2 px-2">
+                        {
+                            recentActivity?.map((item) => (
+                                <div class="text-[10px] border-l border-[#353c33] pl-3 py-1">
+                                    <p class="font-bold text-gray-300 truncate">
+                                        {item.name}
+                                    </p>
+                                    <p class="text-gray-500 truncate">
+                                        {item.status} //{" "}
+                                        {item.utm_source || "Direct"}
+                                    </p>
+                                </div>
+                            ))
+                        }
+                    </div>
                 </div>
             </div>
 
-            <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+            <div class="p-4 border-t border-[#353c33] bg-[#1a1e18]">
                 <a
                     href="/signout"
-                    class="flex items-center p-2 text-red-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-                    >Sign Out</a
+                    class="flex items-center text-xs font-bold text-gray-500 hover:text-[#ea580c] uppercase tracking-wider"
                 >
+                    <span class="mr-2">⏻</span> Disengage
+                </a>
             </div>
         </aside>
 
-        <main class="flex-1 p-8 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-            <div class="md:hidden flex items-center justify-between mb-6">
-                <button
-                    id="mobile-menu-btn"
-                    class="p-2 text-gray-600 rounded-lg hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke-width="1.5"
-                        stroke="currentColor"
-                        class="w-6 h-6"
-                    >
-                        <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-                        ></path>
-                    </svg>
-                </button>
-                <span class="text-lg font-bold dark:text-white">DIM&C</span>
-                <div class="w-8"></div>
-            </div>
-
+        <main class="flex-1 p-4 md:p-8 overflow-y-auto bg-[#353c33]">
             <div
-                id="sidebar-overlay"
-                class="fixed inset-0 bg-gray-900/50 z-40 hidden md:hidden glass"
-            >
-            </div>
-
-            <div
-                class="flex flex-col md:flex-row md:justify-between md:items-end mb-6 gap-4"
+                class="flex flex-col md:flex-row md:justify-between md:items-end mb-8 gap-4 border-b border-[#1f241d] pb-6"
             >
                 <div>
                     <h1
-                        class="text-2xl font-bold text-gray-900 dark:text-white"
+                        class="text-2xl md:text-3xl font-black text-white uppercase tracking-tight"
                     >
                         {
                             searchTerm
-                                ? `Search Results: "${searchTerm}"`
+                                ? `Search Protocol: "${searchTerm}"`
                                 : selectedMonth
-                                  ? `Report: ${monthLinks.find((m) => m.value === selectedMonth)?.label || selectedMonth}`
+                                  ? `SitRep: ${monthLinks.find((m) => m.value === selectedMonth)?.label || selectedMonth}`
                                   : showArchived
-                                    ? "Archived Leads"
+                                    ? "Archive Vault"
                                     : "Executive Overview"
                         }
                     </h1>
-                    <p class="text-gray-500 mt-1 text-sm">
+                    <p class="text-[#9ca3af] mt-1 text-sm font-mono">
                         {
                             searchTerm
-                                ? `Found ${leadsList.length} matches in database`
+                                ? `Target Acquisition: ${leadsList.length} matches`
                                 : selectedMonth
-                                  ? `Performance for the month of ${monthLinks.find((m) => m.value === selectedMonth)?.label}`
-                                  : `Pipeline performance for ${user.email}`
+                                  ? `Operational data for ${monthLinks.find((m) => m.value === selectedMonth)?.label}`
+                                  : `Pipeline status for ${user.email}`
                         }
                     </p>
-
-                    {
-                        searchTerm && (
-                            <a
-                                href="/dashboard"
-                                class="mt-2 inline-block text-xs font-semibold text-blue-600 hover:underline"
-                            >
-                                ← Clear Search & Return to Dashboard
-                            </a>
-                        )
-                    }
                 </div>
-
-                {
-                    !showArchived && (
-                        <div class="flex-1 max-w-md mx-4">
-                            <form method="GET" action="/dashboard">
-                                <label for="search" class="sr-only">
-                                    Search leads
-                                </label>
-                                <div class="relative">
-                                    <div class="absolute inset-y-0 start-0 flex items-center ps-3 pointer-events-none">
-                                        <svg
-                                            class="w-4 h-4 text-gray-500 dark:text-gray-400"
-                                            aria-hidden="true"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            fill="none"
-                                            viewBox="0 0 20 20"
-                                        >
-                                            <path
-                                                stroke="currentColor"
-                                                stroke-linecap="round"
-                                                stroke-linejoin="round"
-                                                stroke-width="2"
-                                                d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"
-                                            />
-                                        </svg>
-                                    </div>
-                                    <input
-                                        type="search"
-                                        name="search"
-                                        value={searchTerm || ""}
-                                        class="block w-full p-2 ps-10 text-sm text-gray-900 border border-gray-300 rounded-lg bg-gray-50 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
-                                        placeholder="Global search (Press Enter)..."
-                                    />
-                                </div>
-                            </form>
-                        </div>
-                    )
-                }
 
                 {
                     !showArchived && (
                         <div class="text-right flex gap-2 justify-end shrink-0">
                             <a
                                 href="/actions/export_csv"
-                                class="text-gray-900 bg-white border border-gray-300 hover:bg-gray-100 focus:ring-4 focus:ring-gray-100 font-medium rounded-lg text-sm px-5 py-2.5 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:hover:bg-gray-700"
+                                class="text-gray-300 bg-[#282e26] border border-[#576352] hover:bg-[#1f241d] hover:text-[#ea580c] font-bold rounded-sm text-xs uppercase tracking-wider px-5 py-2.5 transition-colors"
                             >
-                                <div class="flex items-center gap-2">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke-width="1.5"
-                                        stroke="currentColor"
-                                        class="w-4 h-4"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
-                                        />
-                                    </svg>
-                                    Export
-                                </div>
+                                Export CSV
                             </a>
                             <a
                                 href="/leads/new"
-                                class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 dark:bg-blue-600 dark:hover:bg-blue-700 text-center whitespace-nowrap"
+                                class="text-white bg-[#ea580c] hover:bg-[#c2410c] font-bold rounded-sm text-xs uppercase tracking-wider px-5 py-2.5 transition-colors shadow-lg"
                             >
-                                + Add Opportunity
+                                + Add Op
                             </a>
                         </div>
                     )
@@ -429,94 +445,64 @@ const kanban = {
             {
                 !showArchived && (
                     <>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                            <div class="p-5 rounded-sm bg-[#1a1e18] border-l-4 border-gray-500 shadow-md">
                                 <div class="flex justify-between items-start">
                                     <div>
-                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                                        <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">
                                             Ad Spend
                                         </p>
-                                        <p class="text-2xl font-bold mt-1">
+                                        <p class="text-2xl font-black mt-1 text-white">
                                             {formatMoney(adSpend)}
                                         </p>
                                     </div>
-                                    <div class="p-2 bg-gray-800 rounded-md">
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke-width="1.5"
-                                            stroke="currentColor"
-                                            class="w-6 h-6 text-blue-400"
-                                        >
-                                            <path
-                                                stroke-linecap="round"
-                                                stroke-linejoin="round"
-                                                d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                                            />
-                                        </svg>
-                                    </div>
                                 </div>
                             </div>
-                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow">
+                            <div class="p-5 rounded-sm bg-[#1a1e18] border-l-4 border-[#958a73] shadow-md">
                                 <div class="flex justify-between items-start">
                                     <div>
-                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
-                                            Cost Per Lead
+                                        <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">
+                                            Cost / Lead
                                         </p>
-                                        <p class="text-2xl font-bold mt-1 text-blue-400">
+                                        <p class="text-2xl font-black mt-1 text-[#958a73]">
                                             {formatCurrencyPrecise(cpl)}
                                         </p>
                                     </div>
                                     <div class="text-right">
-                                        <p class="text-xs text-gray-400">
-                                            Leads: {totalLeads}
+                                        <p class="text-[10px] text-gray-500 font-mono">
+                                            N: {totalLeads}
                                         </p>
                                     </div>
                                 </div>
                             </div>
-                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow">
+                            <div class="p-5 rounded-sm bg-[#1a1e18] border-l-4 border-[#ea580c] shadow-md">
                                 <div class="flex justify-between items-start">
                                     <div>
-                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                                        <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">
                                             ROAS
                                         </p>
-                                        <p class="text-2xl font-bold mt-1 text-green-400">
+                                        <p class="text-2xl font-black mt-1 text-[#ea580c]">
                                             {roas.toFixed(1)}x
                                         </p>
                                     </div>
                                     <div class="text-right">
-                                        <p class="text-xs text-gray-400">
+                                        <p class="text-[10px] text-gray-500 font-mono">
                                             Rev: {formatMoney(actualRevenue)}
                                         </p>
                                     </div>
                                 </div>
                             </div>
-                            <div class="p-4 rounded-lg bg-gray-900 dark:bg-gray-800 text-white shadow relative overflow-hidden">
-                                <div class="absolute -right-4 -top-4 opacity-10 text-yellow-500">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 24 24"
-                                        fill="currentColor"
-                                        class="w-24 h-24"
-                                    >
-                                        <path
-                                            fill-rule="evenodd"
-                                            d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"
-                                            clip-rule="evenodd"
-                                        />
-                                    </svg>
-                                </div>
-                                <div class="flex justify-between items-start relative z-10">
+                            <div class="p-5 rounded-sm bg-[#1a1e18] border-l-4 border-yellow-500 shadow-md">
+                                <div class="flex justify-between items-start">
                                     <div>
-                                        <p class="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                                        <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">
                                             Reputation
                                         </p>
                                         <div class="flex items-center gap-2 mt-1">
-                                            <span class="text-2xl font-bold text-yellow-400">
+                                            <span class="text-2xl font-black text-white">
                                                 {reputation.rating}
                                             </span>
-                                            <div class="flex text-yellow-400">
+                                            <div class="flex text-yellow-500">
                                                 {[...Array(5)].map(() => (
                                                     <svg
                                                         xmlns="http://www.w3.org/2000/svg"
@@ -535,71 +521,129 @@ const kanban = {
                                         </div>
                                     </div>
                                     <div class="text-right">
-                                        <p class="text-sm font-bold text-white">
+                                        <p class="text-sm font-bold text-white font-mono">
                                             {reputation.count} Reviews
                                         </p>
-                                        {reputation.velocity > 0 && (
-                                            <p class="text-xs text-green-400 font-medium mt-1">
-                                                +{reputation.velocity} New
-                                            </p>
-                                        )}
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                            <div class="flex flex-col gap-4">
-                                <div class="p-5 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex-1 flex flex-col justify-center border-l-4 border-l-blue-500">
-                                    <h5 class="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
-                                        Projected Pipeline
-                                    </h5>
-                                    <p class="font-bold text-gray-900 dark:text-white text-3xl">
-                                        {formatMoney(projectedRevenue)}
-                                    </p>
-                                </div>
-                                <div class="p-5 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex-1 flex flex-col justify-center border-l-4 border-l-green-500">
-                                    <h5 class="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
-                                        Actual Revenue (Won)
-                                    </h5>
-                                    <p class="font-bold text-gray-900 dark:text-white text-3xl">
-                                        {formatMoney(actualRevenue)}
-                                    </p>
-                                </div>
-                                <div class="p-5 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex-1 flex flex-col justify-center border-l-4 border-l-red-500">
-                                    <h5 class="mb-1 text-sm font-medium text-gray-500 dark:text-gray-400">
-                                        Lost Revenue
-                                    </h5>
-                                    <p class="font-bold text-gray-900 dark:text-white text-3xl">
-                                        {formatMoney(lostRevenue)}
-                                    </p>
-                                </div>
+                        <h5 class="mb-4 text-xs font-bold uppercase tracking-widest text-[#ea580c]">
+                            Strategic Intelligence
+                        </h5>
+                        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+                            <div class="lg:col-span-2 p-6 bg-[#282e26] border border-[#1f241d] rounded-sm relative min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                    {financialTitle}
+                                </h5>
+                                <div
+                                    id="financial-chart"
+                                    class="absolute bottom-4 left-4 right-4 top-12"
+                                    data-labels={JSON.stringify(
+                                        financialLabels,
+                                    )}
+                                    data-spend={JSON.stringify(financialSpend)}
+                                    data-revenue={JSON.stringify(
+                                        financialRevenue,
+                                    )}
+                                />
                             </div>
-
-                            <div
-                                class="col-span-1 lg:col-span-2 p-6 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 relative min-h-[350px]"
-                                style="overflow: visible; z-index: 10;"
-                            >
-                                <h5 class="mb-4 text-sm font-medium text-gray-500 dark:text-gray-400">
-                                    Lead Velocity (7 Days)
+                            <div class="lg:col-span-2 p-6 bg-[#282e26] border border-[#1f241d] rounded-sm relative min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                    {velocityTitle}
                                 </h5>
                                 <div
                                     id="velocity-chart"
-                                    class="absolute bottom-4 left-4 right-4 top-12"
+                                    class="absolute bottom-4 left-4 right-4 top-10"
                                     data-categories={JSON.stringify(
-                                        velocityCats,
+                                        velocityLabels,
                                     )}
-                                    data-series={JSON.stringify(velocitySeries)}
+                                    data-series={JSON.stringify(velocityData)}
                                 />
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                            <div class="p-4 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex flex-col">
-                                <h5 class="mb-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+                        <h5 class="mb-4 text-xs font-bold uppercase tracking-widest text-[#65a30d]">
+                            Market Demographics
+                        </h5>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                            <div class="p-6 bg-[#282e26] border border-[#1f241d] rounded-sm relative min-h-[350px] flex flex-col">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                    Pipeline Ratios
+                                </h5>
+                                <div class="relative w-full flex-1 min-h-[200px]">
+                                    <div
+                                        id="win-loss-chart"
+                                        class="w-full h-full"
+                                        data-won={wonCount}
+                                        data-lost={lostCount}
+                                        data-open={openCount}
+                                    />
+                                </div>
+                                <div class="mt-2 grid grid-cols-1 gap-1 border-t border-[#353c33] pt-2">
+                                    {wlLabels.map((label, i) => (
+                                        <div class="flex items-center justify-between text-xs text-gray-300">
+                                            <div class="flex items-center">
+                                                <span
+                                                    class="w-2 h-2 rounded-full mr-2"
+                                                    style={`background-color: ${WL_COLORS[i]}`}
+                                                />
+                                                <span>{label}</span>
+                                            </div>
+                                            <span class="font-bold text-white">
+                                                {wlSeries[i]}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div class="p-6 bg-[#282e26] border border-[#1f241d] rounded-sm relative min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                    Peak Lead Times (Activity Heatmap)
+                                </h5>
+                                <div
+                                    id="time-chart"
+                                    class="absolute bottom-4 left-4 right-4 top-12"
+                                    data-series={JSON.stringify(heatmapSeries)}
+                                />
+                            </div>
+
+                            <div class="p-6 bg-[#282e26] border border-[#1f241d] rounded-sm relative min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                    Geo Location
+                                </h5>
+                                <div
+                                    id="geo-chart"
+                                    class="absolute bottom-4 left-4 right-4 top-12"
+                                    data-labels={JSON.stringify(geoLabels)}
+                                    data-series={JSON.stringify(geoSeries)}
+                                />
+                            </div>
+
+                            <div class="p-6 bg-[#282e26] border border-[#1f241d] rounded-sm relative min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                    Leads by Service
+                                </h5>
+                                <div
+                                    id="service-chart"
+                                    class="absolute bottom-4 left-4 right-4 top-12"
+                                    data-labels={JSON.stringify(serviceLabels)}
+                                    data-series={JSON.stringify(serviceSeries)}
+                                />
+                            </div>
+                        </div>
+
+                        <h5 class="mb-4 text-xs font-bold uppercase tracking-widest text-[#9ca3af]">
+                            Tactical Breakdown
+                        </h5>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+                            <div class="p-4 bg-[#282e26] border border-[#1f241d] rounded-sm flex flex-col min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
                                     Leads by Status
                                 </h5>
-                                <div class="relative w-full h-[300px]">
+                                <div class="relative w-full flex-1">
                                     <div
                                         id="status-chart"
                                         class="w-full h-full"
@@ -610,11 +654,12 @@ const kanban = {
                                     />
                                 </div>
                             </div>
-                            <div class="p-4 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex flex-col">
-                                <h5 class="mb-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+
+                            <div class="p-4 bg-[#282e26] border border-[#1f241d] rounded-sm flex flex-col min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
                                     Leads by Source
                                 </h5>
-                                <div class="relative w-full h-[220px]">
+                                <div class="relative w-full flex-1 min-h-[200px]">
                                     <div
                                         id="source-chart"
                                         class="w-full h-full"
@@ -629,28 +674,66 @@ const kanban = {
                                         )}
                                     />
                                 </div>
-                                <div class="mt-4 grid grid-cols-2 gap-2 border-t border-gray-100 dark:border-gray-700 pt-3">
+                                <div class="mt-4 grid grid-cols-2 gap-2 border-t border-[#353c33] pt-3">
                                     {sourceLabels.map((label, index) => (
-                                        <div class="flex items-center text-xs">
+                                        <div class="flex items-center text-xs text-gray-300">
                                             <span
                                                 class="w-2.5 h-2.5 rounded-full mr-2 shrink-0"
                                                 style={`background-color: ${CHART_COLORS[index % CHART_COLORS.length]}`}
                                             />
-                                            <span class="text-gray-600 dark:text-gray-300 truncate">
-                                                {label}:{" "}
-                                                <span class="font-bold">
-                                                    {sourceSeries[index]}
-                                                </span>
+                                            <span class="truncate flex-1">
+                                                {label}
+                                            </span>
+                                            <span class="font-bold text-white ml-1">
+                                                {sourceSeries[index]}
                                             </span>
                                         </div>
                                     ))}
                                 </div>
                             </div>
-                            <div class="p-4 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700 flex flex-col">
-                                <h5 class="mb-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+
+                            <div class="p-4 bg-[#282e26] border border-[#1f241d] rounded-sm flex flex-col min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                    Leads by Medium
+                                </h5>
+                                <div class="relative w-full flex-1 min-h-[200px]">
+                                    <div
+                                        id="medium-chart"
+                                        class="w-full h-full"
+                                        data-labels={JSON.stringify(
+                                            mediumLabels,
+                                        )}
+                                        data-series={JSON.stringify(
+                                            mediumSeries,
+                                        )}
+                                        data-colors={JSON.stringify(
+                                            CHART_COLORS,
+                                        )}
+                                    />
+                                </div>
+                                <div class="mt-4 grid grid-cols-2 gap-2 border-t border-[#353c33] pt-3">
+                                    {mediumLabels.map((label, index) => (
+                                        <div class="flex items-center text-xs text-gray-300">
+                                            <span
+                                                class="w-2.5 h-2.5 rounded-full mr-2 shrink-0"
+                                                style={`background-color: ${CHART_COLORS[index % CHART_COLORS.length]}`}
+                                            />
+                                            <span class="truncate flex-1">
+                                                {label}
+                                            </span>
+                                            <span class="font-bold text-white ml-1">
+                                                {mediumSeries[index]}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div class="p-4 bg-[#282e26] border border-[#1f241d] rounded-sm flex flex-col min-h-[350px]">
+                                <h5 class="mb-4 text-[10px] font-bold uppercase tracking-widest text-gray-500">
                                     Leads by Campaign
                                 </h5>
-                                <div class="relative w-full h-[220px]">
+                                <div class="relative w-full flex-1 min-h-[200px]">
                                     <div
                                         id="campaign-chart"
                                         class="w-full h-full"
@@ -665,18 +748,18 @@ const kanban = {
                                         )}
                                     />
                                 </div>
-                                <div class="mt-4 grid grid-cols-2 gap-2 border-t border-gray-100 dark:border-gray-700 pt-3">
+                                <div class="mt-4 grid grid-cols-2 gap-2 border-t border-[#353c33] pt-3">
                                     {campaignLabels.map((label, index) => (
-                                        <div class="flex items-center text-xs">
+                                        <div class="flex items-center text-xs text-gray-300">
                                             <span
                                                 class="w-2.5 h-2.5 rounded-full mr-2 shrink-0"
                                                 style={`background-color: ${CHART_COLORS[index % CHART_COLORS.length]}`}
                                             />
-                                            <span class="text-gray-600 dark:text-gray-300 truncate">
-                                                {label}:{" "}
-                                                <span class="font-bold">
-                                                    {campaignSeries[index]}
-                                                </span>
+                                            <span class="truncate flex-1">
+                                                {label}
+                                            </span>
+                                            <span class="font-bold text-white ml-1">
+                                                {campaignSeries[index]}
                                             </span>
                                         </div>
                                     ))}
@@ -687,22 +770,24 @@ const kanban = {
                 )
             }
 
-            <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4">
+            <h2
+                class="text-xl font-black text-white mb-6 uppercase tracking-wider"
+            >
                 {
                     selectedMonth
-                        ? `Pipeline Status (${monthLinks.find((m) => m.value === selectedMonth)?.label})`
-                        : "Pipeline Status"
+                        ? `Pipeline Status // ${monthLinks.find((m) => m.value === selectedMonth)?.label}`
+                        : "Pipeline Status // Overview"
                 }
             </h2>
 
             <div
                 class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-12"
             >
-                <div class="kanban-col bg-gray-100 dark:bg-gray-800">
-                    <div class="kanban-header text-gray-700 dark:text-gray-200">
-                        <h3>New</h3>
+                <div class="kanban-col bg-[#282e26] border border-[#1f241d]">
+                    <div class="kanban-header text-gray-300">
+                        <h3>NEW</h3>
                         <span
-                            class="badge bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+                            class="badge bg-[#353c33] text-white border border-[#576352]"
                             >{kanban.New.length}</span
                         >
                     </div>
@@ -710,70 +795,66 @@ const kanban = {
                         {kanban.New.map((lead) => <Card lead={lead} />)}
                     </div>
                 </div>
-                <div class="kanban-col bg-blue-50 dark:bg-gray-800/50">
-                    <div class="kanban-header text-blue-800 dark:text-blue-300">
-                        <h3>Contacted</h3>
+                <div class="kanban-col bg-[#282e26] border border-[#1f241d]">
+                    <div class="kanban-header text-[#958a73]">
+                        <h3>CONTACTED</h3>
                         <span
-                            class="badge bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
+                            class="badge bg-[#1f241d] text-[#958a73] border border-[#958a73]"
                             >{kanban.Contacted.length}</span
                         >
                     </div>
                     <div class="kanban-body">
                         {
                             kanban.Contacted.map((lead) => (
-                                <Card lead={lead} border="border-blue-100" />
+                                <Card lead={lead} border="border-[#958a73]" />
                             ))
                         }
                     </div>
                 </div>
-                <div class="kanban-col bg-indigo-50 dark:bg-gray-800/50">
-                    <div
-                        class="kanban-header text-indigo-800 dark:text-indigo-300"
-                    >
-                        <h3>In Progress</h3>
+                <div class="kanban-col bg-[#282e26] border border-[#1f241d]">
+                    <div class="kanban-header text-[#ea580c]">
+                        <h3>IN PROGRESS</h3>
                         <span
-                            class="badge bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-300"
+                            class="badge bg-[#1f241d] text-[#ea580c] border border-orange-900"
                             >{kanban["In Progress"].length}</span
                         >
                     </div>
                     <div class="kanban-body">
                         {
                             kanban["In Progress"].map((lead) => (
-                                <Card lead={lead} border="border-indigo-100" />
+                                <Card lead={lead} border="border-orange-900" />
                             ))
                         }
                     </div>
                 </div>
-                <div class="kanban-col bg-green-50 dark:bg-gray-800/50">
-                    <div
-                        class="kanban-header text-green-800 dark:text-green-300"
-                    >
-                        <h3>Won</h3>
+                <div class="kanban-col bg-[#282e26] border border-[#1f241d]">
+                    <div class="kanban-header text-green-500">
+                        <h3>WON</h3>
                         <span
-                            class="badge bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                            class="badge bg-[#1f241d] text-green-500 border border-green-900"
                             >{kanban.Won.length}</span
                         >
                     </div>
                     <div class="kanban-body">
                         {
                             kanban.Won.map((lead) => (
-                                <Card lead={lead} border="border-green-100" />
+                                <Card lead={lead} border="border-green-900" />
                             ))
                         }
                     </div>
                 </div>
-                <div class="kanban-col bg-red-50 dark:bg-gray-800/50">
-                    <div class="kanban-header text-red-800 dark:text-red-300">
-                        <h3>Lost</h3>
+                <div class="kanban-col bg-[#282e26] border border-[#1f241d]">
+                    <div class="kanban-header text-red-500">
+                        <h3>LOST</h3>
                         <span
-                            class="badge bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                            class="badge bg-[#1f241d] text-red-500 border border-red-900"
                             >{kanban.Lost.length}</span
                         >
                     </div>
                     <div class="kanban-body">
                         {
                             kanban.Lost.map((lead) => (
-                                <Card lead={lead} border="border-red-100" />
+                                <Card lead={lead} border="border-red-900" />
                             ))
                         }
                     </div>
@@ -786,11 +867,10 @@ const kanban = {
 <script>
     import ApexCharts from "apexcharts";
 
-    // --- 1. MOBILE MENU LOGIC ---
+    // --- 1. MOBILE MENU ---
     const btn = document.getElementById("mobile-menu-btn");
     const sidebar = document.getElementById("sidebar");
     const overlay = document.getElementById("sidebar-overlay");
-
     if (btn && sidebar && overlay) {
         const toggleMenu = () => {
             const isClosed = sidebar.classList.contains("-translate-x-full");
@@ -806,54 +886,146 @@ const kanban = {
         overlay.addEventListener("click", toggleMenu);
     }
 
-    // --- 2. CHART HELPER: Generates the White Box Tooltip ---
-    // This ensures every chart looks exactly the same: Black Text on White Background
-    const getTooltipHTML = (label, value) => {
+    // --- 2. CHART HELPERS ---
+    const getTooltipHTML = (label: string, value: any) => {
+        let valStr = value;
+        if (
+            typeof value === "number" &&
+            (label.includes("Revenue") || label.includes("Spend"))
+        ) {
+            valStr = new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+            }).format(value);
+        }
         return `
-        <div style="background: #fff; color: #000; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); font-family: Inter, sans-serif; min-width: 100px;">
-            <div style="font-size: 10px; color: #666; margin-bottom: 2px;">${label || "Value"}</div>
-            <span style="font-weight: bold; font-size: 14px;">${value}</span>
+        <div style="background: #282e26; color: #fff; padding: 8px 12px; border: 1px solid #ea580c; border-radius: 2px; font-family: sans-serif; min-width: 100px;">
+            <div style="font-size: 10px; color: #9ca3af; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.1em;">${label || "Value"}</div>
+            <span style="font-weight: bold; font-size: 14px; color: #fff;">${valStr}</span>
         </div>
       `;
     };
 
-    const sharedOptions = {
-        fontFamily: "Inter, sans-serif",
+    const baseOptions = {
+        fontFamily: "ui-sans-serif, system-ui, sans-serif",
         toolbar: { show: false },
         dataLabels: { enabled: false },
         legend: { show: false },
         chart: { parentHeightOffset: 0, toolbar: { show: false } },
     };
+    const textColor = "#9ca3af";
 
-    const isDark = document.documentElement.classList.contains("dark");
-    const textColor = isDark ? "#9CA3AF" : "#111827";
+    // --- REVENUE vs SPEND ---
+    const finDiv = document.getElementById("financial-chart") as HTMLElement;
+    if (
+        finDiv &&
+        finDiv.dataset.labels &&
+        finDiv.dataset.spend &&
+        finDiv.dataset.revenue
+    ) {
+        const labels = JSON.parse(finDiv.dataset.labels);
+        const spend = JSON.parse(finDiv.dataset.spend);
+        const revenue = JSON.parse(finDiv.dataset.revenue);
 
-    // --- A. VELOCITY CHART ---
+        new ApexCharts(finDiv, {
+            ...baseOptions,
+            chart: {
+                type: "line",
+                height: "100%",
+                parentHeightOffset: 0,
+                toolbar: { show: false },
+            },
+            stroke: { width: [3, 3], curve: "smooth" },
+            series: [
+                { name: "Ad Spend", data: spend },
+                { name: "Revenue (Won)", data: revenue },
+            ],
+            colors: ["#a3a3a3", "#ea580c"],
+            legend: {
+                show: true,
+                position: "bottom",
+                labels: { colors: "#fff" },
+            },
+            xaxis: {
+                categories: labels,
+                labels: { style: { colors: textColor } },
+                axisBorder: { show: false },
+                tooltip: { enabled: false },
+            },
+            yaxis: [
+                {
+                    seriesName: "Ad Spend",
+                    labels: {
+                        style: { colors: "#a3a3a3" },
+                        formatter: (val: number) =>
+                            "$" + (val / 1000).toFixed(1) + "k",
+                    },
+                },
+                {
+                    opposite: true,
+                    seriesName: "Revenue (Won)",
+                    labels: {
+                        style: { colors: "#ea580c" },
+                        formatter: (val: number) =>
+                            "$" + (val / 1000).toFixed(1) + "k",
+                    },
+                },
+            ],
+            grid: { borderColor: "#353c33", strokeDashArray: 4 },
+            tooltip: {
+                enabled: true,
+                shared: true,
+                intersect: false,
+                custom: function ({ series, dataPointIndex, w }: any) {
+                    const spendVal = series[0][dataPointIndex];
+                    const revVal = series[1][dataPointIndex];
+                    const label = w.globals.labels[dataPointIndex];
+                    const f = new Intl.NumberFormat("en-US", {
+                        style: "currency",
+                        currency: "USD",
+                    });
+                    return `
+                  <div style="background: #282e26; color: #fff; padding: 10px; border: 1px solid #ea580c; min-width: 140px;">
+                      <div style="font-size: 10px; color: #9ca3af; margin-bottom: 6px; text-transform: uppercase; border-bottom: 1px solid #444; padding-bottom: 4px;">${label}</div>
+                      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                          <span style="color: #a3a3a3; font-size: 11px;">Spend:</span>
+                          <span style="font-weight: bold; font-size: 12px;">${f.format(spendVal)}</span>
+                      </div>
+                      <div style="display: flex; justify-content: space-between;">
+                          <span style="color: #ea580c; font-size: 11px;">Revenue:</span>
+                          <span style="font-weight: bold; font-size: 12px; color: #ea580c;">${f.format(revVal)}</span>
+                      </div>
+                  </div>
+                `;
+                },
+            },
+        }).render();
+    }
+
+    // --- VELOCITY ---
     const velDiv = document.getElementById("velocity-chart") as HTMLElement;
     if (velDiv && velDiv.dataset.series && velDiv.dataset.categories) {
         new ApexCharts(velDiv, {
-            ...sharedOptions,
+            ...baseOptions,
             chart: {
                 type: "area",
                 height: "100%",
                 toolbar: { show: false },
                 parentHeightOffset: 0,
             },
-            stroke: { curve: "smooth", width: 2 },
+            stroke: { curve: "smooth", width: 2, colors: ["#ea580c"] },
             series: [
-                {
-                    name: "Leads",
-                    data: JSON.parse(velDiv.dataset.series),
-                    color: "#1A56DB",
-                },
+                { name: "Leads", data: JSON.parse(velDiv.dataset.series) },
             ],
             xaxis: {
                 categories: JSON.parse(velDiv.dataset.categories),
                 labels: { style: { colors: textColor } },
                 tooltip: { enabled: false },
+                axisBorder: { show: false },
+                axisTicks: { show: false },
             },
             yaxis: { show: true, labels: { style: { colors: textColor } } },
-            grid: { show: true, strokeDashArray: 4 },
+            grid: { show: true, borderColor: "#353c33", strokeDashArray: 4 },
             fill: {
                 type: "gradient",
                 gradient: {
@@ -861,11 +1033,20 @@ const kanban = {
                     opacityFrom: 0.7,
                     opacityTo: 0.05,
                     stops: [0, 90, 100],
+                    colorStops: [
+                        { offset: 0, color: "#ea580c", opacity: 0.5 },
+                        { offset: 100, color: "#ea580c", opacity: 0 },
+                    ],
                 },
             },
             tooltip: {
                 enabled: true,
-                custom: function ({ series, seriesIndex, dataPointIndex, w }) {
+                custom: function ({
+                    series,
+                    seriesIndex,
+                    dataPointIndex,
+                    w,
+                }: any) {
                     const val = series[seriesIndex][dataPointIndex];
                     return getTooltipHTML("Leads", val);
                 },
@@ -873,64 +1054,171 @@ const kanban = {
         }).render();
     }
 
-    // --- B. STATUS CHART ---
-    const statusDiv = document.getElementById("status-chart") as HTMLElement;
-    if (statusDiv && statusDiv.dataset.cats && statusDiv.dataset.series) {
-        new ApexCharts(statusDiv, {
-            ...sharedOptions,
-            chart: { type: "bar", height: "100%", parentHeightOffset: 0 },
+    // --- PEAK TIME (HEATMAP) ---
+    const timeDiv = document.getElementById("time-chart") as HTMLElement;
+    if (timeDiv && timeDiv.dataset.series) {
+        new ApexCharts(timeDiv, {
+            ...baseOptions,
+            chart: {
+                type: "heatmap",
+                height: "100%",
+                parentHeightOffset: 0,
+                toolbar: { show: false },
+            },
+            series: JSON.parse(timeDiv.dataset.series),
             plotOptions: {
-                bar: { borderRadius: 4, horizontal: true, barHeight: "50%" },
-            },
-            xaxis: {
-                categories: JSON.parse(statusDiv.dataset.cats),
-                labels: { style: { colors: textColor } },
-            },
-            yaxis: {
-                labels: {
-                    style: {
-                        colors: textColor,
-                        fontSize: "11px",
-                        fontWeight: "bold",
+                heatmap: {
+                    enableShades: false, // STOP GREY SHADOWS
+                    shadeIntensity: 0,
+                    radius: 0,
+                    useFillColorAsStroke: false,
+                    // GREEN SCALE (Darkest to Lightest)
+                    colorScale: {
+                        ranges: [
+                            { from: 0, to: 0, color: "#282e26", name: "None" }, // Invisible
+                            { from: 1, to: 1, color: "#14532d", name: "Low" }, // Dark Green
+                            { from: 2, to: 3, color: "#15803d", name: "Med" }, // Mid Green
+                            { from: 4, to: 6, color: "#65a30d", name: "High" }, // Light Lime
+                            { from: 7, to: 100, color: "#a3e635", name: "Max" }, // Super Bright
+                        ],
                     },
                 },
             },
-            series: [
-                { name: "Leads", data: JSON.parse(statusDiv.dataset.series) },
-            ],
-            colors: ["#3B82F6"],
+            stroke: { width: 1, colors: ["#282e26"] },
+            dataLabels: { enabled: false },
+            xaxis: {
+                labels: { style: { colors: textColor, fontSize: "9px" } },
+                tooltip: { enabled: false },
+            },
+            yaxis: {
+                labels: { style: { colors: textColor, fontSize: "10px" } },
+            },
             grid: { show: false },
             tooltip: {
-                enabled: true,
-                custom: function ({ series, seriesIndex, dataPointIndex, w }) {
+                custom: function ({
+                    series,
+                    seriesIndex,
+                    dataPointIndex,
+                    w,
+                }: any) {
                     const val = series[seriesIndex][dataPointIndex];
-                    // Get the category name (e.g., "Won")
-                    const cat = w.globals.labels[dataPointIndex];
-                    return getTooltipHTML(cat, val);
+                    const hour = w.globals.labels[dataPointIndex];
+                    const day = w.config.series[seriesIndex].name;
+                    return getTooltipHTML(`${day} @ ${hour}`, val);
                 },
             },
         }).render();
     }
 
-    // --- C. SOURCE CHART ---
-    const sourceDiv = document.getElementById("source-chart") as HTMLElement;
-    if (
-        sourceDiv &&
-        sourceDiv.dataset.labels &&
-        sourceDiv.dataset.series &&
-        sourceDiv.dataset.colors
-    ) {
-        new ApexCharts(sourceDiv, {
-            ...sharedOptions,
-            chart: { type: "donut", height: "100%" },
-            labels: JSON.parse(sourceDiv.dataset.labels),
-            series: JSON.parse(sourceDiv.dataset.series).map(Number),
-            colors: JSON.parse(sourceDiv.dataset.colors),
-            plotOptions: { pie: { donut: { size: "75%" } } },
-            stroke: { show: false },
+    // --- GEO LOCATION ---
+    const geoDiv = document.getElementById("geo-chart") as HTMLElement;
+    if (geoDiv && geoDiv.dataset.labels && geoDiv.dataset.series) {
+        new ApexCharts(geoDiv, {
+            ...baseOptions,
+            chart: {
+                type: "bar",
+                height: "100%",
+                parentHeightOffset: 0,
+                toolbar: { show: false },
+            },
+            plotOptions: {
+                bar: { borderRadius: 0, horizontal: true, barHeight: "50%" },
+            },
+            xaxis: {
+                categories: JSON.parse(geoDiv.dataset.labels),
+                labels: { show: false },
+                axisBorder: { show: false },
+                tooltip: { enabled: false },
+            },
+            yaxis: { labels: { style: { colors: "#fff", fontSize: "10px" } } },
+            series: [
+                { name: "Leads", data: JSON.parse(geoDiv.dataset.series) },
+            ],
+            colors: ["#ea580c"],
+            grid: { show: false },
             tooltip: {
                 enabled: true,
-                custom: function ({ series, seriesIndex, w }) {
+                custom: function ({
+                    series,
+                    seriesIndex,
+                    dataPointIndex,
+                    w,
+                }: any) {
+                    const val = series[seriesIndex][dataPointIndex];
+                    const loc = w.globals.labels[dataPointIndex];
+                    return getTooltipHTML(loc, val);
+                },
+            },
+        }).render();
+    }
+
+    // --- SERVICE TYPE ---
+    const serviceDiv = document.getElementById("service-chart") as HTMLElement;
+    if (serviceDiv && serviceDiv.dataset.labels && serviceDiv.dataset.series) {
+        new ApexCharts(serviceDiv, {
+            ...baseOptions,
+            chart: {
+                type: "bar",
+                height: "100%",
+                parentHeightOffset: 0,
+                toolbar: { show: false },
+            },
+            plotOptions: {
+                bar: { borderRadius: 0, horizontal: true, barHeight: "50%" },
+            },
+            xaxis: {
+                categories: JSON.parse(serviceDiv.dataset.labels),
+                labels: { show: false },
+                axisBorder: { show: false },
+                tooltip: { enabled: false },
+            },
+            yaxis: { labels: { style: { colors: "#fff", fontSize: "10px" } } },
+            series: [
+                { name: "Leads", data: JSON.parse(serviceDiv.dataset.series) },
+            ],
+            colors: ["#65a30d"], // Light Green
+            grid: { show: false },
+            tooltip: {
+                enabled: true,
+                custom: function ({
+                    series,
+                    seriesIndex,
+                    dataPointIndex,
+                    w,
+                }: any) {
+                    const val = series[seriesIndex][dataPointIndex];
+                    const loc = w.globals.labels[dataPointIndex];
+                    return getTooltipHTML(loc, val);
+                },
+            },
+        }).render();
+    }
+
+    // --- WIN vs LOSS vs OPEN ---
+    const wlDiv = document.getElementById("win-loss-chart") as HTMLElement;
+    if (
+        wlDiv &&
+        wlDiv.dataset.won &&
+        wlDiv.dataset.lost &&
+        wlDiv.dataset.open
+    ) {
+        new ApexCharts(wlDiv, {
+            ...baseOptions,
+            chart: { type: "donut", height: "100%" },
+            labels: ["Won", "Lost", "Open Pipeline"],
+            series: [
+                parseInt(wlDiv.dataset.won),
+                parseInt(wlDiv.dataset.lost),
+                parseInt(wlDiv.dataset.open),
+            ],
+            colors: ["#65a30d", "#ef4444", "#1a1e18"],
+            plotOptions: {
+                pie: { donut: { size: "70%", labels: { show: false } } },
+            },
+            stroke: { show: true, colors: ["#282e26"], width: 2 },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, w }: any) {
                     const val = series[seriesIndex];
                     const label = w.globals.labels[seriesIndex];
                     return getTooltipHTML(label, val);
@@ -939,25 +1227,116 @@ const kanban = {
         }).render();
     }
 
-    // --- D. CAMPAIGN CHART ---
+    // --- STATUS ---
+    const statusDiv = document.getElementById("status-chart");
+    if (statusDiv && statusDiv.dataset.cats && statusDiv.dataset.series) {
+        new ApexCharts(statusDiv, {
+            ...baseOptions,
+            // FIX: Explicitly set toolbar: { show: false } here
+            chart: {
+                type: "bar",
+                height: "100%",
+                toolbar: { show: false },
+                parentHeightOffset: 0,
+            },
+            plotOptions: {
+                bar: { borderRadius: 0, horizontal: true, barHeight: "40%" },
+            },
+            xaxis: {
+                categories: JSON.parse(statusDiv.dataset.cats),
+                labels: { style: { colors: textColor } },
+                axisBorder: { show: false },
+                tooltip: { enabled: false },
+            },
+            yaxis: {
+                labels: {
+                    style: {
+                        colors: "#fff",
+                        fontSize: "10px",
+                        fontWeight: "bold",
+                    },
+                },
+            },
+            series: [
+                { name: "Leads", data: JSON.parse(statusDiv.dataset.series) },
+            ],
+            colors: ["#65a30d"],
+            grid: { show: false },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, dataPointIndex, w }) {
+                    const val = series[seriesIndex][dataPointIndex];
+                    const cat = w.globals.labels[dataPointIndex];
+                    return getTooltipHTML(cat, val);
+                },
+            },
+        }).render();
+    }
+
+    // --- SOURCE ---
+    const sourceDiv = document.getElementById("source-chart") as HTMLElement;
+    if (sourceDiv && sourceDiv.dataset.labels && sourceDiv.dataset.series) {
+        new ApexCharts(sourceDiv, {
+            ...baseOptions,
+            chart: { type: "donut", height: "100%" },
+            labels: JSON.parse(sourceDiv.dataset.labels),
+            series: JSON.parse(sourceDiv.dataset.series).map(Number),
+            colors: ["#ea580c", "#65a30d", "#a3a3a3", "#d97706", "#475569"],
+            plotOptions: {
+                pie: { donut: { size: "70%", labels: { show: false } } },
+            },
+            stroke: { show: true, colors: ["#282e26"], width: 2 },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, w }: any) {
+                    const val = series[seriesIndex];
+                    const label = w.globals.labels[seriesIndex];
+                    return getTooltipHTML(label, val);
+                },
+            },
+        }).render();
+    }
+
+    // --- MEDIUM (NEW) ---
+    const mediumDiv = document.getElementById("medium-chart") as HTMLElement;
+    if (mediumDiv && mediumDiv.dataset.labels && mediumDiv.dataset.series) {
+        new ApexCharts(mediumDiv, {
+            ...baseOptions,
+            chart: { type: "donut", height: "100%" },
+            labels: JSON.parse(mediumDiv.dataset.labels),
+            series: JSON.parse(mediumDiv.dataset.series).map(Number),
+            colors: ["#ea580c", "#65a30d", "#a3a3a3", "#d97706", "#475569"],
+            plotOptions: {
+                pie: { donut: { size: "70%", labels: { show: false } } },
+            },
+            stroke: { show: true, colors: ["#282e26"], width: 2 },
+            tooltip: {
+                enabled: true,
+                custom: function ({ series, seriesIndex, w }: any) {
+                    const val = series[seriesIndex];
+                    const label = w.globals.labels[seriesIndex];
+                    return getTooltipHTML(label, val);
+                },
+            },
+        }).render();
+    }
+
+    // --- CAMPAIGN ---
     const campDiv = document.getElementById("campaign-chart") as HTMLElement;
-    if (
-        campDiv &&
-        campDiv.dataset.labels &&
-        campDiv.dataset.series &&
-        campDiv.dataset.colors
-    ) {
+    if (campDiv && campDiv.dataset.labels && campDiv.dataset.series) {
         new ApexCharts(campDiv, {
-            ...sharedOptions,
+            ...baseOptions,
             chart: { type: "donut", height: "100%" },
             labels: JSON.parse(campDiv.dataset.labels),
             series: JSON.parse(campDiv.dataset.series).map(Number),
-            colors: JSON.parse(campDiv.dataset.colors),
-            plotOptions: { pie: { donut: { size: "75%" } } },
-            stroke: { show: false },
+            colors: ["#ea580c", "#65a30d", "#a3a3a3", "#d97706", "#475569"],
+            plotOptions: {
+                pie: { donut: { size: "70%", labels: { show: false } } },
+            },
+            stroke: { show: true, colors: ["#282e26"], width: 2 },
             tooltip: {
                 enabled: true,
-                custom: function ({ series, seriesIndex, w }) {
+                custom: function ({ series, seriesIndex, w }: any) {
                     const val = series[seriesIndex];
                     const label = w.globals.labels[seriesIndex];
                     return getTooltipHTML(label, val);
@@ -968,27 +1347,46 @@ const kanban = {
 </script>
 
 <style is:global>
-    /* 1. KANBAN STYLES */
+    /* DROPDOWN FIX */
+    select {
+        @apply bg-[#1f241d] text-white border border-[#353c33] rounded-sm;
+    }
+
+    /* KANBAN FIX */
     .kanban-col {
-        @apply rounded-lg p-3 min-h-[500px];
+        @apply rounded-sm p-3 min-h-[500px];
     }
     .kanban-header {
-        @apply flex justify-between items-center mb-4 font-bold;
+        @apply flex justify-between items-center mb-4 font-bold text-xs uppercase tracking-widest;
     }
     .badge {
-        @apply text-xs font-medium px-2.5 py-0.5 rounded;
+        @apply text-xs font-bold px-2 py-0.5 rounded-sm;
     }
     .kanban-body {
         @apply space-y-3;
     }
 
-    /* 2. CHART FIXES */
-    /* Allow charts to draw outside their box so tooltips don't get cut off */
+    /* HOVER FIX: Force all links inside kanban/charts to be Orange on hover */
+    a:hover {
+        color: #ea580c !important;
+    }
+
+    /* CHART FIXES */
     .apexcharts-canvas {
         overflow: visible !important;
     }
     .apexcharts-tooltip {
-        /* Ensure it sits on top of everything */
         z-index: 9999 !important;
+    }
+
+    /* NUCLEAR OPTION: Hides the white box X-axis tooltip completely */
+    .apexcharts-xaxistooltip {
+        display: none !important;
+    }
+
+    /* For Revenue Chart Legend ONLY */
+    .apexcharts-legend-text {
+        color: #ffffff !important;
+        font-family: ui-sans-serif, system-ui, sans-serif !important;
     }
 </style>
