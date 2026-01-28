@@ -1,7 +1,7 @@
 ---
 import Layout from "../layouts/Layout.astro";
 
-// Check for success flag (User just applied)
+// Check for success flag
 const success = Astro.url.searchParams.get("success") === "true";
 ---
 
@@ -52,24 +52,25 @@ const success = Astro.url.searchParams.get("success") === "true";
 						<h2 class="text-2xl font-bold text-white mb-2">
 							Transmission Received
 						</h2>
-						<p class="text-gray-400 mb-8">
-							Your application has been logged in the command
-							center. We will review your briefing and establish
-							comms if there is a strategic fit.
+						<p class="text-gray-400 mb-8 text-sm">
+							Your briefing has been logged in the command center.
+							<br />
+							We will review your objectives and establish comms
+							shortly.
 						</p>
 						<a
 							href="/"
-							class="text-[#ea580c] font-bold hover:text-white transition-colors uppercase text-sm tracking-wider"
+							class="text-[#ea580c] font-bold hover:text-white transition-colors uppercase text-xs tracking-wider"
 						>
 							Return to Base
 						</a>
 					</div>
 				) : (
-					/* APPLICATION FORM */
+					/* INTAKE FORM */
 					<div class="p-8">
-						<p class="text-gray-400 text-sm mb-6 text-center italic">
-							Accepting select clients for 2026. <br />
-							Apply below for a strategic consultation.
+						<p class="text-gray-400 text-xs mb-8 text-center italic tracking-wide">
+							// SECURE CHANNEL OPEN // <br />
+							ACCEPTING NEW OPERATIONS FOR Q1 2026
 						</p>
 
 						<form
@@ -79,72 +80,73 @@ const success = Astro.url.searchParams.get("success") === "true";
 						>
 							<div class="grid grid-cols-2 gap-4">
 								<div>
-									<label class="block text-xs font-bold text-[#6b7280] uppercase tracking-wider mb-1">
-										Full Name
-									</label>
+									<label class="label">Full Name</label>
 									<input
 										type="text"
 										name="name"
 										required
-										class="w-full bg-[#1f241d] border border-[#353c33] text-white font-mono text-sm p-2 rounded-sm focus:border-[#ea580c] outline-none placeholder:text-gray-600/50 placeholder:italic"
+										class="input-field"
 										placeholder="John Doe"
 									/>
 								</div>
 								<div>
-									<label class="block text-xs font-bold text-[#6b7280] uppercase tracking-wider mb-1">
-										Geo Location
-									</label>
-									<input
-										type="text"
-										name="company"
-										required
-										class="w-full bg-[#1f241d] border border-[#353c33] text-white font-mono text-sm p-2 rounded-sm focus:border-[#ea580c] outline-none placeholder:text-gray-600/50 placeholder:italic"
-										placeholder="Riverside, CA"
-									/>
-								</div>
-							</div>
-
-							<div class="grid grid-cols-2 gap-4">
-								<div>
-									<label class="block text-xs font-bold text-[#6b7280] uppercase tracking-wider mb-1">
-										Email
-									</label>
-									<input
-										type="email"
-										name="email"
-										required
-										class="w-full bg-[#1f241d] border border-[#353c33] text-white font-mono text-sm p-2 rounded-sm focus:border-[#ea580c] outline-none placeholder:text-gray-600/50 placeholder:italic"
-										placeholder="john@acme.com"
-									/>
-								</div>
-								<div>
-									<label class="block text-xs font-bold text-[#6b7280] uppercase tracking-wider mb-1">
-										Phone
-									</label>
+									<label class="label">Phone Comm</label>
 									<input
 										type="tel"
 										name="phone"
-										class="w-full bg-[#1f241d] border border-[#353c33] text-white font-mono text-sm p-2 rounded-sm focus:border-[#ea580c] outline-none placeholder:text-gray-600/50 placeholder:italic"
+										class="input-field"
 										placeholder="(555) 123-4567"
 									/>
 								</div>
 							</div>
 
 							<div>
-								<label class="block text-xs font-bold text-[#6b7280] uppercase tracking-wider mb-1">
-									Mission / Project Brief
+								<label class="label">Email Frequency</label>
+								<input
+									type="email"
+									name="email"
+									required
+									class="input-field"
+									placeholder="john@company.com"
+								/>
+							</div>
+
+							<div class="grid grid-cols-2 gap-4">
+								<div>
+									<label class="label">Geo Location</label>
+									<input
+										type="text"
+										name="location"
+										class="input-field"
+										placeholder="City, State"
+									/>
+								</div>
+								<div>
+									<label class="label">Service Needed</label>
+									<input
+										type="text"
+										name="service"
+										class="input-field"
+										placeholder="e.g. Divorce, Roofing"
+									/>
+								</div>
+							</div>
+
+							<div>
+								<label class="label">
+									Mission Brief / Obstacles
 								</label>
 								<textarea
 									name="details"
 									rows="3"
-									class="w-full bg-[#1f241d] border border-[#353c33] text-white font-mono text-sm p-2 rounded-sm focus:border-[#ea580c] outline-none placeholder:text-gray-600/50 placeholder:italic"
-									placeholder="Briefly describe your current marketing bottlenecks..."
+									class="input-field"
+									placeholder="Describe your current marketing bottlenecks..."
 								/>
 							</div>
 
 							<button
 								type="submit"
-								class="w-full bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold py-3 uppercase tracking-widest shadow-lg transition-all transform hover:-translate-y-0.5 mt-4"
+								class="w-full bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold py-3 uppercase tracking-widest shadow-lg transition-all transform hover:-translate-y-0.5 mt-2 rounded-sm text-sm"
 							>
 								Initiate Contact
 							</button>
@@ -156,13 +158,13 @@ const success = Astro.url.searchParams.get("success") === "true";
 			<div
 				class="bg-[#1f241d] p-4 text-center border-t border-[#353c33] flex justify-between items-center px-8"
 			>
-				<span class="text-[#353c33] text-xs font-mono"
-					>SECURE CHANNEL // ENCRYPTED</span
+				<span class="text-[#353c33] text-[10px] font-mono"
+					>ENCRYPTED // V1.0</span
 				>
 
 				<a
 					href="/login"
-					class="text-[#353c33] hover:text-[#ea580c] text-xs uppercase font-bold transition-colors"
+					class="text-[#353c33] hover:text-[#ea580c] text-[10px] uppercase font-bold transition-colors"
 				>
 					Admin Access
 				</a>
@@ -170,3 +172,12 @@ const success = Astro.url.searchParams.get("success") === "true";
 		</div>
 	</div>
 </Layout>
+
+<style>
+	.label {
+		@apply block text-[10px] font-bold text-[#6b7280] uppercase tracking-wider mb-1;
+	}
+	.input-field {
+		@apply w-full bg-[#1f241d] border border-[#353c33] text-white px-4 py-2.5 text-sm focus:outline-none focus:border-[#ea580c] transition-colors rounded-sm placeholder-gray-700;
+	}
+</style>
