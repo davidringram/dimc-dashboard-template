@@ -30,10 +30,10 @@ This project utilizes a **Wildcard Subdomain Strategy** to isolate client data w
 
 ```mermaid
 graph TD
-    A[Client Site: johnlaw.com] -->|Webhook| B(n8n Automation)
+    A[Client Site: exampleurl.com] -->|Webhook| B(n8n Automation)
     B -->|Enrichment & Cleanup| C[(Supabase DB)]
     C -->|Row Level Security| D{Dashboard}
-    D -->|Subdomain Sniffer| E[johnlaw.davidingram.marketing]
-    D -->|Subdomain Sniffer| F[beaverlaw.davidingram.marketing]
+    D -->|Subdomain Sniffer| E[exampleurl.davidingram.marketing]
+    D -->|Subdomain Sniffer| F[exampleurl2.davidingram.marketing]
     B -->|Direct Alert| G[HTML Email Notification]
 ```
