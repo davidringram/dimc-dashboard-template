@@ -12,6 +12,14 @@ The system automates the path from **Lead Ingestion** to **Executive Briefing**,
 
 ---
 
+## 📊 Why and How This Dashbaord Works
+
+| **Strategic Intelligence and Unit Economics** | **Marketing Demographics and Lead Source**
+| :--- | :--- |
+| ![Admin Dashboard](public/images/strat-intel.jpg) | ![Marketing Demographics](public/images/mkt-demo.jpg) 
+| **Kanban Lead Pipeline** | **Add Leads via API or Natively**
+| ![Kanban Board](public/images/kandban.jpg) | ![Marketing Demographics](public/images/add-lead.jpg) 
+
 ## 🛠 Intelligence Stack (Tech)
 
 | Component          | Technology                                                          |
