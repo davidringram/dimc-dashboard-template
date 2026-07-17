@@ -74,83 +74,88 @@ const success = Astro.url.searchParams.get("success") === "true";
 						</p>
 
 						<form
-							action="/api/submit_interest"
-							method="post"
-							class="space-y-5"
-						>
-							<div class="grid grid-cols-2 gap-4">
-								<div>
-									<label class="label">Full Name</label>
-									<input
-										type="text"
-										name="name"
-										required
-										class="input-field"
-										placeholder="John Doe"
-									/>
-								</div>
-								<div>
-									<label class="label">Phone Comm</label>
-									<input
-										type="tel"
-										name="phone"
-										class="input-field"
-										placeholder="(555) 123-4567"
-									/>
-								</div>
-							</div>
+    action="/api/submit_interest"
+    method="post"
+    class="space-y-5"
+>
+    <div class="hidden">
+        <label for="nickname">Leave this field blank</label>
+        <input type="text" id="nickname" name="nickname" autocomplete="off" />
+    </div>
 
-							<div>
-								<label class="label">Email Frequency</label>
-								<input
-									type="email"
-									name="email"
-									required
-									class="input-field"
-									placeholder="john@company.com"
-								/>
-							</div>
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <label class="label">Full Name</label>
+            <input
+                type="text"
+                name="name"
+                required
+                class="input-field"
+                placeholder="John Doe"
+            />
+        </div>
+        <div>
+            <label class="label">Phone Comm</label>
+            <input
+                type="tel"
+                name="phone"
+                class="input-field"
+                placeholder="(555) 123-4567"
+            />
+        </div>
+    </div>
 
-							<div class="grid grid-cols-2 gap-4">
-								<div>
-									<label class="label">Geo Location</label>
-									<input
-										type="text"
-										name="location"
-										class="input-field"
-										placeholder="City, State"
-									/>
-								</div>
-								<div>
-									<label class="label">Service Needed</label>
-									<input
-										type="text"
-										name="service"
-										class="input-field"
-										placeholder="e.g. Divorce, Roofing"
-									/>
-								</div>
-							</div>
+    <div>
+        <label class="label">Email Frequency</label>
+        <input
+            type="email"
+            name="email"
+            required
+            class="input-field"
+            placeholder="john@company.com"
+        />
+    </div>
 
-							<div>
-								<label class="label">
-									Mission Brief / Obstacles
-								</label>
-								<textarea
-									name="details"
-									rows="3"
-									class="input-field"
-									placeholder="Describe your current marketing bottlenecks..."
-								/>
-							</div>
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <label class="label">Geo Location</label>
+            <input
+                type="text"
+                name="location"
+                class="input-field"
+                placeholder="City, State"
+            />
+        </div>
+        <div>
+            <label class="label">Service Needed</label>
+            <input
+                type="text"
+                name="service"
+                class="input-field"
+                placeholder="e.g. Divorce, Roofing"
+            />
+        </div>
+    </div>
 
-							<button
-								type="submit"
-								class="w-full bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold py-3 uppercase tracking-widest shadow-lg transition-all transform hover:-translate-y-0.5 mt-2 rounded-sm text-sm"
-							>
-								Initiate Contact
-							</button>
-						</form>
+    <div>
+        <label class="label">
+            Mission Brief / Obstacles
+        </label>
+        <textarea
+            name="details"
+            rows="3"
+            class="input-field"
+            placeholder="Describe your current marketing bottlenecks..."
+        />
+    </div>
+
+    <button
+        type="submit"
+        class="w-full bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold py-3 uppercase tracking-widest shadow-lg transition-all transform hover:-translate-y-0.5 mt-2 rounded-sm text-sm"
+    >
+        Initiate Contact
+    </button>
+</form>						
 					</div>
 				)
 			}
