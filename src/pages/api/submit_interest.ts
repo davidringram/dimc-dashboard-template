@@ -3,7 +3,6 @@ import { createClient } from "@supabase/supabase-js";
 
 export const POST: APIRoute = async ({ request }) => {
     // Use environment variables directly for public ingestion
-    // This is more robust for public-facing forms
     const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
 
@@ -15,6 +14,22 @@ export const POST: APIRoute = async ({ request }) => {
 
     try {
         const formData = await request.formData();
+        
+        // 1. HONEYPOT TRAP VALIDATION
+        const honeypot = formData.get("nickname");
+
+        // If the honeypot field is missing entirely (direct API attack tool payload)
+        // OR if the bot filled out the hidden field, terminate immediately.
+        if (honeypot === null || honeypot.toString().trim().length > 0) {
+            console.warn("🛡️ Spambot or Direct API payload blocked.");
+            // Send a fake 302 redirect back so the bot stops its execution sequence
+            return new Response(null, {
+                status: 302,
+                headers: { Location: "/?success=true" },
+            });
+        }
+
+        // 2. STANDARD INTAKE PROCESS
         const email = formData.get("email")?.toString();
 
         if (!email) {
@@ -45,7 +60,6 @@ export const POST: APIRoute = async ({ request }) => {
         }
 
         // Success - Redirect back to home with success flag
-        // This allows the index.astro to show the "Transmission Received" message
         return new Response(null, {
             status: 302,
             headers: { Location: "/?success=true" },
