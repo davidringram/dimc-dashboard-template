@@ -2,7 +2,6 @@ import type { APIRoute } from "astro";
 import { createClient } from "@supabase/supabase-js";
 
 export const POST: APIRoute = async ({ request }) => {
-    // Use environment variables directly for public ingestion
     const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
 
@@ -15,28 +14,39 @@ export const POST: APIRoute = async ({ request }) => {
     try {
         const formData = await request.formData();
         
-        // 1. HONEYPOT TRAP VALIDATION
         const honeypot = formData.get("nickname");
-
-        // If the honeypot field is missing entirely (direct API attack tool payload)
-        // OR if the bot filled out the hidden field, terminate immediately.
-        if (honeypot === null || honeypot.toString().trim().length > 0) {
-            console.warn("🛡️ Spambot or Direct API payload blocked.");
-            // Send a fake 302 redirect back so the bot stops its execution sequence
-            return new Response(null, {
-                status: 302,
-                headers: { Location: "/?success=true" },
-            });
-        }
-
-        // 2. STANDARD INTAKE PROCESS
+        const gateToken = formData.get("gate_token");
         const email = formData.get("email")?.toString();
 
+        // --- SECURITY PERIMETER ATTACK GATE ---
+        // 1. If a bot completely stripped out the honeypot key to bypass validation -> DROP
+        // 2. If a bot filled out the honeypot text input -> DROP
+        if (honeypot === null || honeypot.toString().trim().length > 0) {
+            console.warn("🛡️ Security Alert: Bot payload omitted required fields or filled trap.");
+            return new Response(null, { status: 302, headers: { Location: "/?success=true" } });
+        }
+
+        // 3. HUMAN VELOCITY CHECK (Speed Trap)
+        if (gateToken) {
+            const submissionTime = Date.now();
+            const loadTime = parseInt(gateToken.toString(), 10);
+            const durationSeconds = (submissionTime - loadTime) / 1000;
+
+            // If the form is filled out and submitted in under 2 seconds, it's machine automation
+            if (durationSeconds < 2) {
+                console.warn(`🛡️ Security Alert: Velocity bypass caught. Form filled in ${durationSeconds}s.`);
+                return new Response(null, { status: 302, headers: { Location: "/?success=true" } });
+            }
+        } else {
+            // Missing token means direct headless target execution -> DROP
+            return new Response(null, { status: 302, headers: { Location: "/?success=true" } });
+        }
+
+        // --- CRITICAL DATA VALIDATION ---
         if (!email) {
             return new Response(JSON.stringify({ error: "Email is required" }), { status: 400 });
         }
 
-        // Map Form Data to our specific DB Schema
         const leadData = {
             name: formData.get("name")?.toString() || "Unknown Subject",
             email: email,
@@ -51,7 +61,6 @@ export const POST: APIRoute = async ({ request }) => {
             created_at: new Date().toISOString(),
         };
 
-        // Insert into DB
         const { error } = await supabase.from("leads").insert([leadData]);
 
         if (error) {
@@ -59,14 +68,13 @@ export const POST: APIRoute = async ({ request }) => {
             return new Response(JSON.stringify({ error: error.message }), { status: 500 });
         }
 
-        // Success - Redirect back to home with success flag
         return new Response(null, {
             status: 302,
             headers: { Location: "/?success=true" },
         });
 
     } catch (err) {
-        console.error("Catch Error:", err);
-        return new Response(JSON.stringify({ error: "System Error: Contact Terminated" }), { status: 500 });
+        console.error("System Failure:", err);
+        return new Response(JSON.stringify({ error: "System Error" }), { status: 500 });
     }
 };

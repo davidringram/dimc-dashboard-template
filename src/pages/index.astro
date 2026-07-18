@@ -78,10 +78,13 @@ const success = Astro.url.searchParams.get("success") === "true";
     method="post"
     class="space-y-5"
 >
-    <div class="hidden">
-        <label for="nickname">Leave this field blank</label>
-        <input type="text" id="nickname" name="nickname" autocomplete="off" />
-    </div>
+    <form action="/api/submit_interest" method="post" class="space-y-5">
+		<input type="hidden" name="gate_token" value={Date.now()} />
+			<div class="hidden" aria-hidden="true">
+				<input type="text" name="nickname" tabindex="-1" autocomplete="off" />
+			</div> 
+
+
 
     <div class="grid grid-cols-2 gap-4">
         <div>
