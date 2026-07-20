@@ -1,191 +1,74 @@
 ---
 import Layout from "../layouts/Layout.astro";
-
-// Check for success flag
-const success = Astro.url.searchParams.get("success") === "true";
 ---
 
 <Layout title="David R. Ingram | Fractional CMO">
-	<div
-		class="min-h-screen bg-[#353c33] flex flex-col items-center justify-center p-4 relative overflow-hidden"
-	>
-		<div
-			class="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] pointer-events-none"
-		>
-		</div>
-
-		<div
-			class="relative z-10 w-full max-w-lg bg-[#282e26] border-t-4 border-[#ea580c] shadow-2xl rounded-sm"
-		>
-			<div class="bg-[#1f241d] p-8 text-center border-b border-[#353c33]">
-				<h1
-					class="text-3xl font-black text-white tracking-tight uppercase"
-				>
-					David R. Ingram
-				</h1>
-				<p
-					class="text-[#ea580c] font-bold text-sm tracking-[0.2em] uppercase mt-1"
-				>
-					Fractional CMO
-				</p>
-			</div>
-
-			{
-				success ? (
-					<div class="p-10 text-center">
-						<div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-[#353c33] border-2 border-[#ea580c] mb-6">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								class="h-8 w-8 text-[#ea580c]"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke="currentColor"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="3"
-									d="M5 13l4 4L19 7"
-								/>
-							</svg>
-						</div>
-						<h2 class="text-2xl font-bold text-white mb-2">
-							Transmission Received
-						</h2>
-						<p class="text-gray-400 mb-8 text-sm">
-							Your briefing has been logged in the command center.
-							<br />
-							We will review your objectives and establish comms
-							shortly.
-						</p>
-						<a
-							href="/"
-							class="text-[#ea580c] font-bold hover:text-white transition-colors uppercase text-xs tracking-wider"
-						>
-							Return to Base
-						</a>
-					</div>
-				) : (
-					/* INTAKE FORM */
-					<div class="p-8">
-						<p class="text-gray-400 text-xs mb-8 text-center italic tracking-wide">
-							// SECURE CHANNEL OPEN // <br />
-							ACCEPTING NEW OPERATIONS FOR Q1 2026
-						</p>
-
-						<form
-    action="/api/submit_interest"
-    method="post"
-    class="space-y-5"
->
-    <form action="/api/submit_interest" method="post" class="space-y-5">
-		<input type="hidden" name="gate_token" value={Date.now()} />
-			<div class="hidden" aria-hidden="true">
-				<input type="text" name="nickname" tabindex="-1" autocomplete="off" />
-			</div> 
-
-
-
-    <div class="grid grid-cols-2 gap-4">
-        <div>
-            <label class="label">Full Name</label>
-            <input
-                type="text"
-                name="name"
-                required
-                class="input-field"
-                placeholder="John Doe"
-            />
-        </div>
-        <div>
-            <label class="label">Phone Comm</label>
-            <input
-                type="tel"
-                name="phone"
-                class="input-field"
-                placeholder="(555) 123-4567"
-            />
-        </div>
-    </div>
-
-    <div>
-        <label class="label">Email Frequency</label>
-        <input
-            type="email"
-            name="email"
-            required
-            class="input-field"
-            placeholder="john@company.com"
-        />
-    </div>
-
-    <div class="grid grid-cols-2 gap-4">
-        <div>
-            <label class="label">Geo Location</label>
-            <input
-                type="text"
-                name="location"
-                class="input-field"
-                placeholder="City, State"
-            />
-        </div>
-        <div>
-            <label class="label">Service Needed</label>
-            <input
-                type="text"
-                name="service"
-                class="input-field"
-                placeholder="e.g. Divorce, Roofing"
-            />
-        </div>
-    </div>
-
-    <div>
-        <label class="label">
-            Mission Brief / Obstacles
-        </label>
-        <textarea
-            name="details"
-            rows="3"
-            class="input-field"
-            placeholder="Describe your current marketing bottlenecks..."
-        />
-    </div>
-
-    <button
-        type="submit"
-        class="w-full bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold py-3 uppercase tracking-widest shadow-lg transition-all transform hover:-translate-y-0.5 mt-2 rounded-sm text-sm"
+    <div
+        class="min-h-screen bg-[#353c33] flex flex-col items-center justify-center p-4 relative overflow-hidden"
     >
-        Initiate Contact
-    </button>
-</form>						
-					</div>
-				)
-			}
+        <div
+            class="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] pointer-events-none"
+        >
+        </div>
 
-			<div
-				class="bg-[#1f241d] p-4 text-center border-t border-[#353c33] flex justify-between items-center px-8"
-			>
-				<span class="text-[#353c33] text-[10px] font-mono"
-					>ENCRYPTED // V1.0</span
-				>
+        <div
+            class="relative z-10 w-full max-w-lg bg-[#282e26] border-t-4 border-[#ea580c] shadow-2xl rounded-sm overflow-hidden"
+        >
+            <div class="bg-[#1f241d] p-8 text-center border-b border-[#353c33]">
+                <h1
+                    class="text-3xl font-black text-white tracking-tight uppercase"
+                >
+                    David R. Ingram
+                </h1>
+                <p
+                    class="text-[#ea580c] font-bold text-sm tracking-[0.2em] uppercase mt-1"
+                >
+                    Fractional CMO Command Center
+                </p>
+            </div>
 
-				<a
-					href="/login"
-					class="text-[#353c33] hover:text-[#ea580c] text-[10px] uppercase font-bold transition-colors"
-				>
-					Admin Access
-				</a>
-			</div>
-		</div>
-	</div>
+            <div class="p-8 text-center space-y-6">
+                <p class="text-gray-400 text-xs italic tracking-wide">
+                    // RESTRICTED ACCESS // <br />
+                    CLIENT OPERATIONS & ANALYTICS PORTAL
+                </p>
+
+                <div class="py-4 border-y border-[#353c33] space-y-2">
+                    <h2 class="text-lg font-bold text-white uppercase tracking-wider">
+                        Client Operations Portal
+                    </h2>
+                    <p class="text-gray-400 text-xs leading-relaxed">
+                        Authorized personnel only. Access active growth dashboards, lead pipelines, and campaign metrics.
+                    </p>
+                </div>
+
+                <div class="space-y-3 pt-2">
+                    <a
+                        href="/login"
+                        class="block w-full bg-[#ea580c] hover:bg-[#c2410c] text-white font-bold py-3.5 uppercase tracking-widest shadow-lg transition-all transform hover:-translate-y-0.5 rounded-sm text-sm"
+                    >
+                        Access Client Portal
+                    </a>
+
+                    <a
+                        href="mailto:david@davidringram.com"
+                        class="block w-full bg-[#1f241d] hover:bg-[#353c33] border border-[#353c33] hover:border-[#ea580c] text-gray-300 hover:text-white font-bold py-3 uppercase tracking-wider transition-colors rounded-sm text-xs"
+                    >
+                        Direct Inquiry // david@davidringram.com
+                    </a>
+                </div>
+            </div>
+
+            <div
+                class="bg-[#1f241d] p-4 text-center border-t border-[#353c33] flex justify-between items-center px-8"
+            >
+                <span class="text-[#353c33] text-[10px] font-mono"
+                    >ENCRYPTED // V1.0</span
+                >
+                <span class="text-gray-500 text-[10px] uppercase font-mono tracking-wider">
+                    System Online
+                </span>
+            </div>
+        </div>
+    </div>
 </Layout>
-
-<style>
-	.label {
-		@apply block text-[10px] font-bold text-[#6b7280] uppercase tracking-wider mb-1;
-	}
-	.input-field {
-		@apply w-full bg-[#1f241d] border border-[#353c33] text-white px-4 py-2.5 text-sm focus:outline-none focus:border-[#ea580c] transition-colors rounded-sm placeholder-gray-700;
-	}
-</style>
